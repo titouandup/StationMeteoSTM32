@@ -666,6 +666,7 @@ int main(void)
     Global_Init();   // inclut HAL_Init(), l'USART2 (console) et l'UART4 (GPS, 9600 bauds)
 
     GPIO_InitTypeDef gpio = {0};
+    //Odw1 
 
     gpio.Mode = GPIO_MODE_OUTPUT_PP;       // sorties LED
     gpio.Pin = CLK_PIN; HAL_GPIO_Init(CLK_PORT, &gpio);
