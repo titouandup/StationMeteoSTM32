@@ -54,11 +54,11 @@ uint16_t lumin_read(void)
 #define GPS_PRINT_MS    2000UL   // période d'affichage (x2 en économique)
 #define GPS_SILENCE_MS  3000UL   // sans trame RMC depuis ce délai = problème de câblage
 
-static char line[100], rmc[100];
+static char line[100], rmc[100], gga[100];
 static uint8_t idx;
-static volatile uint8_t rmc_ready;
+static volatile uint8_t rmc_ready, gga_ready;
 
-// Appelée à chaque octet reçu du GPS : on ne garde que les trames RMC
+// Appelée à chaque octet reçu du GPS : on ne garde que les trames RMC (position) et GGA (altitude)
 void gps_rx_byte(char c)
 {
     if (c == '$') idx = 0;
@@ -68,6 +68,9 @@ void gps_rx_byte(char c)
         if (idx > 6 && memcmp(line + 3, "RMC", 3) == 0 && !rmc_ready) {
             memcpy(rmc, line, idx + 1);
             rmc_ready = 1;
+        } else if (idx > 6 && memcmp(line + 3, "GGA", 3) == 0 && !gga_ready) {
+            memcpy(gga, line, idx + 1);
+            gga_ready = 1;
         }
         idx = 0;
     }
@@ -90,24 +93,35 @@ static double to_deg(const char *s, char hemi)  // ddmm.mmmm -> degrés décimau
     return (hemi == 'S' || hemi == 'W') ? -deg : deg;
 }
 
-int gps_valid;
-double gps_lat, gps_lon;
+int gps_valid, gps_alt_valid;
+double gps_lat, gps_lon, gps_alt;
+static int  gps_sats;                   // satellites utilisés (trame GGA)
 static char gps_time[7] = "------";    // hhmmss
 static uint32_t last_rmc_tick;
 
 void gps_poll(void)
 {
-    if (!rmc_ready) return;
     char *f[12];
-    int n = split(rmc, f, 12);
-    gps_valid = (n >= 7 && f[2][0] == 'A');
-    if (n >= 2 && strlen(f[1]) >= 6) memcpy(gps_time, f[1], 6);
-    if (gps_valid) {
-        gps_lat = to_deg(f[3], f[4][0]);
-        gps_lon = to_deg(f[5], f[6][0]);
+    int n;
+
+    if (rmc_ready) {
+        n = split(rmc, f, 12);
+        gps_valid = (n >= 7 && f[2][0] == 'A');
+        if (n >= 2 && strlen(f[1]) >= 6) memcpy(gps_time, f[1], 6);
+        if (gps_valid) {
+            gps_lat = to_deg(f[3], f[4][0]);
+            gps_lon = to_deg(f[5], f[6][0]);
+        }
+        last_rmc_tick = HAL_GetTick();
+        rmc_ready = 0;
     }
-    last_rmc_tick = HAL_GetTick();
-    rmc_ready = 0;
+    if (gga_ready) {                          // champ 6 = qualité du fix (0 = pas de fix), champ 9 = altitude en m
+        n = split(gga, f, 12);
+        if (n >= 8) gps_sats = atoi(f[7]);
+        gps_alt_valid = (n >= 10 && f[6][0] > '0' && f[9][0] != 0);
+        if (gps_alt_valid) gps_alt = strtod(f[9], NULL);
+        gga_ready = 0;
+    }
 }
 
 void gps_report(void)
@@ -122,8 +136,8 @@ void gps_report(void)
     if (last_rmc_tick == 0 || now - last_rmc_tick > GPS_SILENCE_MS)
         console("GPS : aucune donnee (verifier cablage port A1)\r\n");
     else if (!gps_valid)
-        console("GPS : pas de fix (UTC %.2s:%.2s:%.2s)\r\n", gps_time, gps_time + 2, gps_time + 4);
+        console("GPS : pas de fix (UTC %.2s:%.2s:%.2s)  satellites = %d\r\n", gps_time, gps_time + 2, gps_time + 4, gps_sats);
     else
-        console("GPS : %.2s:%.2s:%.2s UTC  lat = %.5f  lon = %.5f\r\n",
-                gps_time, gps_time + 2, gps_time + 4, gps_lat, gps_lon);
+        console("GPS : %.2s:%.2s:%.2s UTC  lat = %.5f  lon = %.5f  alt = %.1f m  satellites = %d\r\n",
+                gps_time, gps_time + 2, gps_time + 4, gps_lat, gps_lon, gps_alt_valid ? gps_alt : 0.0, gps_sats);
 }
