@@ -7,6 +7,7 @@
 
 extern UART_HandleTypeDef huart2;   // console (USB ST-Link)
 extern UART_HandleTypeDef huart4;   // GPS SIM28 (port A1 : PA1 = RX)
+extern I2C_HandleTypeDef  hi2c1;    // défini dans setup.c
 
 #define NUM_LEDS 1
 
@@ -247,33 +248,12 @@ static void gps_report(void)
                 gps_time, gps_time + 2, gps_time + 4, gps_lat, gps_lon);
 }
 
-/* ---------- I2C1 (PB8 = SCL, PB9 = SDA) ---------- */
-static I2C_HandleTypeDef hi2c1;
-
-void HAL_I2C_MspInit(I2C_HandleTypeDef *h)
-{
-    if (h->Instance != I2C1) return;
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-    GPIO_InitTypeDef g = {0};
-    g.Pin       = GPIO_PIN_8 | GPIO_PIN_9;
-    g.Mode      = GPIO_MODE_AF_OD;            // open-drain, obligatoire en I2C
-    g.Pull      = GPIO_PULLUP;
-    g.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
-    g.Alternate = GPIO_AF4_I2C1;
-    HAL_GPIO_Init(GPIOB, &g);
-    __HAL_RCC_I2C1_CLK_ENABLE();
-}
-
+/* ---------- I2C1 (PB8 = SCL, PB9 = SDA) : broches et horloge déjà gérées par setup.c ---------- */
 static void i2c_init(void)
 {
     uint32_t f = HAL_RCC_GetPCLK1Freq();
-    hi2c1.Instance             = I2C1;
-    hi2c1.Init.Timing          = (f == 80000000UL) ? 0x10909CEC : 0x00000E14; // 100 kHz pour 80 MHz ou 4 MHz
-    hi2c1.Init.AddressingMode  = I2C_ADDRESSINGMODE_7BIT;
-    hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-    hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-    hi2c1.Init.NoStretchMode   = I2C_NOSTRETCH_DISABLE;
-    HAL_I2C_Init(&hi2c1);
+    hi2c1.Init.Timing = (f == 80000000UL) ? 0x10909CEC : 0x00000E14;   // 100 kHz pour 80 MHz ou 4 MHz
+    HAL_I2C_Init(&hi2c1);                                              // ré-applique seulement le timing
     console("I2C : PCLK1 = %lu Hz (timing prevu pour 80 MHz ou 4 MHz)\r\n", (unsigned long)f);
 }
 
@@ -524,8 +504,8 @@ typedef struct {
     uint32_t timeout;         // secondes
 } Params;
 
-static const Params DEFAULTS = { 10, 2048, 30 };
-static Params params = { 10, 2048, 30 };
+#define DEFAULT_PARAMS { 10, 2048, 30 }
+static Params params = DEFAULT_PARAMS;
 
 // Valide et applique "NOM=valeur" pour un paramètre numérique
 static void set_param(uint32_t *p, const char *val, uint32_t min, uint32_t max)
@@ -590,7 +570,7 @@ static void config_command(char *s)
     if (!strcmp(s, "VERSION"))
         console("3W v0.1 - lot 0001\r\n");
     else if (!strcmp(s, "RESET")) {
-        params = DEFAULTS;
+        params = (Params)DEFAULT_PARAMS;
         console("Parametres reinitialises\r\n");
     }
     else if (val && !strcmp(s, "LOG_INTERVAL"))
@@ -617,8 +597,12 @@ static void config_command(char *s)
 static void console_poll(void)
 {
     if (!cmd_ready) return;
-    if (mode == MODE_CONFIG) config_command(cmd);
-    else console("Refuse : commandes acceptees uniquement en mode configuration\r\n");
+    if (mode == MODE_CONFIG) {
+        mode_since = HAL_GetTick();          // activité : le délai de 30 min repart de zéro
+        config_command(cmd);
+    } else {
+        console("Refuse : commandes acceptees uniquement en mode configuration\r\n");
+    }
     cmd_len = 0;
     cmd_ready = 0;
 }
@@ -663,10 +647,9 @@ static void measure_cycle(void)
 
 int main(void)
 {
-    Global_Init();   // inclut HAL_Init(), l'USART2 (console) et l'UART4 (GPS, 9600 bauds)
+    Global_Init();   // inclut HAL_Init(), l'USART2 (console), l'UART4 (GPS, 9600 bauds) et l'I2C1
 
     GPIO_InitTypeDef gpio = {0};
-    //Odw1 
 
     gpio.Mode = GPIO_MODE_OUTPUT_PP;       // sorties LED
     gpio.Pin = CLK_PIN; HAL_GPIO_Init(CLK_PORT, &gpio);
