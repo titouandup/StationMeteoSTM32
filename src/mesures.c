@@ -113,9 +113,9 @@ void sensors_report(void)
 }
 
 /* ---------- Cycle de mesure ---------- */
-static void fmt_val(char *b, size_t n, int ok, float v)   // valeur absente = "NA"
+static void fmt_val(char *b, size_t n, int ok, const char *fmt, double v)   // valeur absente = "NA"
 {
-    if (ok) snprintf(b, n, "%.1f", v);
+    if (ok) snprintf(b, n, fmt, v);
     else    snprintf(b, n, "NA");
 }
 
@@ -132,17 +132,19 @@ void measure_cycle(void)
     last = now;
     n++;
 
-    char ts[TS_LEN], tb[12], pb[12], hb[12], gb[32] = "NA", line[128];
+    char ts[TS_LEN], tb[12], pb[12], hb[12], latb[16], lonb[16], altb[12], line[128];
     float t = 0, p = 0, h = 0;
     int ok = bme_ok && bme_read(&t, &p, &h) == 0;
+    int gps_now = (mode != MODE_ECO || n % 2 == 0);          // économique : GPS une mesure sur deux
     timestamp(ts, sizeof(ts));
-    fmt_val(tb, sizeof(tb), ok, t);
-    fmt_val(pb, sizeof(pb), ok, p);
-    fmt_val(hb, sizeof(hb), ok, h);
-    if (gps_valid && (mode != MODE_ECO || n % 2 == 0))      // économique : GPS une mesure sur deux
-        snprintf(gb, sizeof(gb), "%.5f,%.5f", gps_lat, gps_lon);
+    fmt_val(tb, sizeof(tb), ok, "%.1f", t);
+    fmt_val(pb, sizeof(pb), ok, "%.1f", p);
+    fmt_val(hb, sizeof(hb), ok, "%.1f", h);
+    fmt_val(latb, sizeof(latb), gps_valid && gps_now, "%.5f", gps_lat);
+    fmt_val(lonb, sizeof(lonb), gps_valid && gps_now, "%.5f", gps_lon);
+    fmt_val(altb, sizeof(altb), gps_alt_valid && gps_now, "%.1f", gps_alt);
 
-    snprintf(line, sizeof(line), "%s;%s;%s;%s;%u;%s\r\n", ts, tb, pb, hb, lumin_read(), gb);
+    snprintf(line, sizeof(line), "%s;%s;%s;%s;%u;%s;%s;%s\r\n", ts, tb, pb, hb, lumin_read(), latb, lonb, altb);
     log_line(line);
     console("Mesure #%lu : %s\r\n", (unsigned long)n, sd_error ? "echec ecriture SD" : "enregistree sur SD");
 }
