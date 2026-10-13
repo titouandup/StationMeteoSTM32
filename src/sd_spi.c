@@ -118,6 +118,12 @@ static int sd_init_once(void)
     HAL_Delay(10);
     for (int i = 0; i < 10; i++) xfer(0xFF);      // 80 impulsions d'horloge, CS haut
 
+    // Après un reset du processeur seul, la carte a pu être coupée en plein transfert d'un bloc :
+    // 520 octets d'horloge, CS bas, lui laissent le temps de finir avant CMD0
+    HAL_GPIO_WritePin(SD_CS_PORT, SD_CS_PIN, GPIO_PIN_RESET);
+    for (int i = 0; i < SD_BLOCK + 8; i++) xfer(0xFF);
+    deselect();
+
     if (send_cmd(CMD0, 0) != 1) { deselect(); return ERR_NO_CARD; }
 
     uint32_t t0 = HAL_GetTick();
