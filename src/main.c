@@ -9,7 +9,8 @@
 
 int main(void)
 {
-    Global_Init();   // inclut HAL_Init(), l'USART2 (console), l'UART4 (GPS, 9600 bauds), l'I2C1 et le SPI1
+    Global_Init();
+    params_load();   // inclut HAL_Init(), l'USART2 (console), l'UART4 (GPS, 9600 bauds), l'I2C1 et le SPI1
 
     led_init();
     buttons_init();
