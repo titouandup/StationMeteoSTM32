@@ -1,4 +1,5 @@
 #include "setup.h"
+#include "settings.h"
 #include "stm32l4xx_hal.h"
 #include "board_pins.h"
 
@@ -197,6 +198,6 @@ void Global_Init(void)
     MX_I2C1_Init();
     MX_SPI1_Init();
 
-    uart_init(&huart2, USART2, 115200);   // debug / printf
+    uart_init(&huart2, USART2, CONSOLE_BAUD);   // debug / printf
     uart_init(&huart4, UART4, 9600);      // GPS
 }
