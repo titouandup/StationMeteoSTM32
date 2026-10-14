@@ -1,4 +1,5 @@
 #include "modes.h"
+#include "settings.h"
 #include "stm32l4xx_hal.h"
 #include "console.h"
 #include "i2c.h"
@@ -48,7 +49,6 @@ void leds_set_all(uint8_t r, uint8_t g, uint8_t b)
 #define RED_PORT   GPIOB
 #define RED_PIN    GPIO_PIN_3  // D3 : bouton rouge
 #define PRESSED    GPIO_PIN_RESET
-#define HOLD_MS    5000UL
 
 Button button_green = { GREEN_PORT, GREEN_PIN, 0, 0, 0 };
 Button button_red   = { RED_PORT,   RED_PIN,   0, 0, 0 };
@@ -77,7 +77,7 @@ void buttons_init(void)                       // actifs à l'état bas
     gpio.Pin = RED_PIN;   HAL_GPIO_Init(RED_PORT, &gpio);
 }
 
-#define CONFIG_TIMEOUT  (30UL * 60UL * 1000UL)
+#define CONFIG_TIMEOUT  (CONFIG_TIMEOUT_MIN * 60UL * 1000UL)
 
 
 static const uint8_t mode_color[][3] = {   // R, G, B
@@ -97,14 +97,12 @@ static const char *mode_name[] = {
 Mode mode;
 static Mode prev_mode;
 uint32_t mode_since;
-static uint8_t err_state;                     // erreur affichée sur la LED (0 = aucune, 1 = RTC, 2 = SD)
 
 
 void set_mode(Mode m)
 {
     mode = m;
     mode_since = HAL_GetTick();
-    err_state = 0;                            // la LED reprend la couleur du mode
     if (m == MODE_MAINT) log_stop();          // ferme le fichier : la carte peut être retirée sans risque
     leds_set_all(mode_color[m][0], mode_color[m][1], mode_color[m][2]);
     console("Mode : %s\r\n", mode_name[m]);
@@ -130,23 +128,53 @@ void update_mode(void)
     }
 }
 
-// Erreurs : RTC = LED qui alterne rouge / bleu à 1 Hz (500 ms chaque couleur), SD = rouge fixe
+/* ---------- Erreurs ---------- */
+typedef struct {
+    const char *text;
+    uint8_t a[3], b[3];     // couleurs R, G, B (a en premier, b ensuite)
+    uint16_t a_ms;          // durée de a dans la période ; b dure le reste
+} ErrInfo;
+
+static const ErrInfo err_info[ERR_COUNT] = {
+    [ERR_RTC]        = { "acces a l'horloge RTC",              {255, 0, 0}, {0, 0, 255},     ERR_PERIOD_MS / 2 },
+    [ERR_SD_IO]      = { "acces ou ecriture sur la carte SD",  {255, 0, 0}, {255, 255, 255}, ERR_PERIOD_MS / 3 },
+    [ERR_SD_FULL]    = { "carte SD pleine",                    {255, 0, 0}, {255, 255, 255}, ERR_PERIOD_MS / 2 },
+    [ERR_GPS]        = { "acces aux donnees du GPS",           {255, 0, 0}, {255, 255, 0},   ERR_PERIOD_MS / 2 },
+    [ERR_SENSOR]     = { "acces aux donnees d'un capteur",     {255, 0, 0}, {0, 255, 0},     ERR_PERIOD_MS / 2 },
+    [ERR_INCOHERENT] = { "donnees incoherentes, verifier le materiel", {255, 0, 0}, {0, 255, 0}, ERR_PERIOD_MS / 3 },
+};
+
+static uint8_t err_mask;                      // bit e = erreur e présente
+
+void error_set(ErrCode e, int on)
+{
+    uint8_t bit = 1u << e;
+    if (on && !(err_mask & bit)) console("ERREUR E%02d : %s\r\n", e, err_info[e].text);
+    if (on) err_mask |= bit;
+    else    err_mask &= ~bit;
+}
+
+// Affiche l'erreur la plus prioritaire ; sans erreur, la LED reprend la couleur du mode
 void error_led(void)
 {
-    static uint8_t phase;
-    static uint32_t last;
-    uint32_t now = HAL_GetTick();
-    uint8_t want = rtc_fail ? 1 : (sd_error ? 2 : 0);
+    error_set(ERR_RTC, rtc_fail);
+    static uint8_t shown, phase;              // erreur affichée (0 = couleur du mode) et phase du clignotement
+    uint8_t want = 0;
+    for (uint8_t e = 1; e < ERR_COUNT && !want; e++)
+        if (err_mask & (1u << e)) want = e;
 
-    if (want == 1) {
-        if (err_state != 1 || now - last >= 500) {
-            last = now; phase ^= 1;
-            if (phase) leds_set_all(255, 0, 0);
-            else       leds_set_all(0, 0, 255);
-        }
-    } else if (want != err_state) {
-        if (want == 2) leds_set_all(255, 0, 0);
-        else           leds_set_all(mode_color[mode][0], mode_color[mode][1], mode_color[mode][2]);
+    if (!want) {
+        if (shown) leds_set_all(mode_color[mode][0], mode_color[mode][1], mode_color[mode][2]);
+        shown = 0;
+        return;
     }
-    err_state = want;
+
+    const ErrInfo *i = &err_info[want];
+    uint8_t ph = (HAL_GetTick() % ERR_PERIOD_MS) >= i->a_ms;
+    if (want != shown || ph != phase) {
+        const uint8_t *c = ph ? i->b : i->a;
+        leds_set_all(c[0], c[1], c[2]);
+    }
+    shown = want;
+    phase = ph;
 }

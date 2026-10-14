@@ -27,6 +27,18 @@ extern uint32_t mode_since;     // instant du dernier changement de mode (ou act
 
 void set_mode(Mode m);
 void update_mode(void);         // changements de mode par les boutons
-void error_led(void);           // LED d'erreur RTC / SD (prioritaire sur la couleur du mode)
+// Erreurs, par ordre de priorité d'affichage sur la LED (la plus prioritaire en premier)
+typedef enum {
+    ERR_RTC = 1,         // E01 : rouge / bleu 1 Hz
+    ERR_SD_IO,           // E02 : rouge / blanc, blanc 2 fois plus long
+    ERR_SD_FULL,         // E03 : rouge / blanc, durées égales
+    ERR_GPS,             // E04 : rouge / jaune, durées égales
+    ERR_SENSOR,          // E05 : rouge / vert, durées égales
+    ERR_INCOHERENT,      // E06 : rouge / vert, vert 2 fois plus long
+    ERR_COUNT
+} ErrCode;
+
+void error_set(ErrCode e, int on);   // lève ou retire une erreur (message console au moment où elle apparaît)
+void error_led(void);                // LED d'erreur (prioritaire sur la couleur du mode)
 
 #endif
