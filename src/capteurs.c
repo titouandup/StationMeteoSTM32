@@ -1,4 +1,5 @@
 #include "capteurs.h"
+#include "settings.h"
 #include <stdlib.h>
 #include <string.h>
 #include "stm32l4xx_hal.h"
@@ -51,8 +52,6 @@ uint16_t lumin_read(void)
     return v;
 }
 
-#define GPS_PRINT_MS    2000UL   // période d'affichage (x2 en économique)
-#define GPS_SILENCE_MS  3000UL   // sans trame RMC depuis ce délai = problème de câblage
 
 static char line[100], rmc[100], gga[100];
 static uint8_t idx;
@@ -124,10 +123,15 @@ void gps_poll(void)
     }
 }
 
+int gps_alive(uint32_t max_ms)
+{
+    return last_rmc_tick != 0 && HAL_GetTick() - last_rmc_tick <= max_ms;
+}
+
 void gps_report(void)
 {
     static uint32_t last_print;
-    uint32_t period = (mode == MODE_ECO) ? 2 * GPS_PRINT_MS : GPS_PRINT_MS;
+    uint32_t period = (mode == MODE_ECO) ? ECO_FACTOR * GPS_PRINT_MS : GPS_PRINT_MS;
     uint32_t now = HAL_GetTick();
 
     if (mode == MODE_CONFIG || now - last_print < period) return;   // pas d'acquisition en configuration
