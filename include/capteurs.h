@@ -13,7 +13,10 @@ extern double gps_lat, gps_lon, gps_alt;    // degrés décimaux
 
 void gps_rx_byte(char c);          // à appeler pour chaque octet reçu
 void gps_poll(void);               // décode la dernière trame RMC
-int  gps_alive(uint32_t max_ms);   // 1 si une trame RMC est arrivée depuis moins de max_ms
-void gps_report(void);             // affichage périodique sur la console
+void gps_start(void);              // écoute le GPS (début d'une acquisition)
+void gps_stop(void);               // arrête la réception : le GPS n'est plus lu
+int  gps_fresh(void);              // 1 si une trame RMC est arrivée depuis gps_start()
+void gps_rx_done(void);            // à appeler quand un octet du GPS est reçu (callback UART)
+void gps_rx_error(void);           // à appeler après une erreur de réception du GPS
 
 #endif

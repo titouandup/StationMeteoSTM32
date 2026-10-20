@@ -134,7 +134,7 @@ int bme_init(void)
 
     uint8_t v = 0x01;   // humidité x1 (à écrire AVANT ctrl_meas)
     HAL_I2C_Mem_Write(&hi2c1, bme_addr, 0xF2, I2C_MEMADD_SIZE_8BIT, &v, 1, 100);
-    v = 0x27;           // temp x1, pression x1, mode normal
+    v = 0x24;           // temp x1, pression x1, mode veille : le capteur ne mesure rien tant qu'on ne le demande pas
     HAL_I2C_Mem_Write(&hi2c1, bme_addr, 0xF4, I2C_MEMADD_SIZE_8BIT, &v, 1, 100);
     return 0;
 }
@@ -178,7 +178,14 @@ static uint32_t comp_H(int32_t adc)
 
 int bme_read(float *t, float *p, float *h)
 {
-    uint8_t d[8];
+    uint8_t d[8], v = 0x25;   // temp x1, pression x1, mode forcé : une seule mesure, puis retour en veille
+    if (HAL_I2C_Mem_Write(&hi2c1, bme_addr, 0xF4, I2C_MEMADD_SIZE_8BIT, &v, 1, 100) != HAL_OK)
+        return -1;
+    uint32_t t0 = HAL_GetTick();
+    do {                                              // registre d'état 0xF3, bit 3 = mesure en cours (≈ 10 ms)
+        HAL_Delay(2);
+        if (HAL_I2C_Mem_Read(&hi2c1, bme_addr, 0xF3, I2C_MEMADD_SIZE_8BIT, &v, 1, 100) != HAL_OK) return -1;
+    } while ((v & 0x08) && HAL_GetTick() - t0 < 50);
     if (HAL_I2C_Mem_Read(&hi2c1, bme_addr, 0xF7, I2C_MEMADD_SIZE_8BIT, d, 8, 100) != HAL_OK)
         return -1;
     int32_t adc_P = ((int32_t)d[0] << 12) | ((int32_t)d[1] << 4) | (d[2] >> 4);
