@@ -139,34 +139,6 @@ static void fmt_val(char *b, size_t n, int ok, const char *fmt, double v)   // v
     else    snprintf(b, n, "NA");
 }
 
-/* ---------- Affichage des capteurs (x ECO_FACTOR en économique) ---------- */
-void sensors_report(void)
-{
-    static uint32_t last;
-    uint32_t period = (mode == MODE_ECO) ? ECO_FACTOR * SENSOR_PRINT_MS : SENSOR_PRINT_MS;
-    uint32_t now = HAL_GetTick();
-    if (mode == MODE_CONFIG || now - last < period) return;   // pas d'acquisition en configuration
-    last = now;
-
-    char ts[TS_LEN], tb[12], pb[12], hb[12];
-    timestamp(ts, sizeof(ts));
-
-    float t = 0, p = 0, h = 0;
-    int ok = bme_ok && bme_read(&t, &p, &h) == 0;
-    fmt_val(tb, sizeof(tb), ok && params.temp_air, "%.1f", t);
-    fmt_val(pb, sizeof(pb), ok && params.pressure, "%.1f", p);
-    fmt_val(hb, sizeof(hb), ok && params.hygr && t >= params.hygr_mint && t <= params.hygr_maxt, "%.1f", h);
-    console("[%s] BME280 : T = %s C  P = %s hPa  H = %s %%\r\n", ts, tb, pb, hb);
-
-    if (params.lumin) {
-        uint16_t lum = lumin_read();
-        const char *lvl = lum < params.lumin_low ? "faible" : (lum > params.lumin_high ? "forte" : "moyenne");
-        console("[%s] Luminosite : %u (%s)\r\n", ts, lum, lvl);
-    } else {
-        console("[%s] Luminosite : NA\r\n", ts);
-    }
-}
-
 /* ---------- Surveillance de la carte SD ----------
  * Toutes les SD_CHECK_MS : détecte le retrait de la carte et son retour, sans attendre la prochaine mesure.
  */
@@ -191,64 +163,24 @@ void sd_watch(void)
     error_set(ERR_SD_FULL, sd_full);
 }
 
-/* ---------- Surveillance du BME280 ----------
- * Toutes les SD_CHECK_MS : détecte le débranchement et le retour du capteur sans attendre la prochaine mesure.
- */
-void sensor_watch(void)
-{
-    static uint32_t last;
-    static uint8_t miss, lost;
-    uint32_t now = HAL_GetTick();
-    if ((mode != MODE_STANDARD && mode != MODE_ECO) || now - last < SD_CHECK_MS) return;
-    last = now;
-
-    if (!(params.temp_air || params.hygr || params.pressure)) {   // capteur désactivé : rien à surveiller
-        miss = lost = 0;
-        error_set(ERR_SENSOR, 0);
-        return;
-    }
-
-    float t, p, h;
-    if (bme_ok && bme_read(&t, &p, &h) == 0) {
-        if (lost) { lost = 0; bme_init(); }                       // revenu : la puce est à reconfigurer
-        miss = 0;
-        error_set(ERR_SENSOR, 0);
-    } else {
-        lost = 1;
-        if (miss < 255) miss++;
-        if (miss >= SENSOR_CHECK_MISSES) error_set(ERR_SENSOR, 1);
-        if (!bme_ok && miss % 5 == 0) bme_ok = (bme_init() == 0);
-    }
-}
-
-/* ---------- Surveillance du GPS ----------
- * Toutes les SD_CHECK_MS : plus de trame RMC depuis GPS_SILENCE_MS = GPS débranché ; le retour efface l'erreur.
- */
-void gps_watch(void)
-{
-    static uint32_t last;
-    uint32_t now = HAL_GetTick();
-    if ((mode != MODE_STANDARD && mode != MODE_ECO) || now - last < SD_CHECK_MS) return;
-    last = now;
-    error_set(ERR_GPS, !gps_alive(GPS_SILENCE_MS));
-}
-
 /* ---------- Cycle de mesure ----------
  * Toutes les LOG_INTERVAL minutes (x ECO_FACTOR en économique) : une ligne horodatée sur la SD.
- * Le BME280 est relu toutes les 200 ms pendant TIMEOUT secondes au plus ; sans réponse, ses valeurs sont "NA"
- * et, après SENSOR_MAX_MISSES mesures de suite en timeout, le capteur est signalé en erreur (idem pour le GPS).
+ * Entre deux mesures, les capteurs sont arrêtés : le BME280 est en veille (mode forcé, une mesure par lecture),
+ * l'ADC ne convertit que sur demande et la réception du GPS est coupée (gps_start / gps_stop).
+ * Le BME280 est relu toutes les 200 ms et le GPS écouté pendant TIMEOUT secondes au plus ; sans réponse, les valeurs
+ * sont "NA" et, après SENSOR_MAX_MISSES mesures de suite en timeout, le capteur est signalé en erreur.
  * Une valeur hors des seuils min/max est enregistrée "NA" et signalée comme incohérente.
  */
 void measure_cycle(void)
 {
     static uint32_t last, n, acq_start, acq_try;
-    static uint8_t first = 1, acquiring, got_bme, bme_miss, gps_miss;
+    static uint8_t first = 1, acquiring, got_bme, gps_want, bme_miss, gps_miss;
     static float t, p, h;
     uint32_t now = HAL_GetTick();
     int need_bme = params.temp_air || params.hygr || params.pressure;
 
     // pas d'acquisition en configuration ni d'écriture SD en maintenance ; première mesure dès le démarrage
-    if (mode == MODE_CONFIG || mode == MODE_MAINT) { acquiring = 0; return; }
+    if (mode == MODE_CONFIG || mode == MODE_MAINT) { acquiring = 0; gps_stop(); return; }
 
     if (!acquiring) {
         uint32_t period = (uint32_t)params.log_interval * 60000UL * (mode == MODE_ECO ? ECO_FACTOR : 1);
@@ -259,27 +191,25 @@ void measure_cycle(void)
         acquiring = 1;
         got_bme = !need_bme;
         n++;
+        gps_want = (mode != MODE_ECO || n % 2 == 0);       // GPS : en économique, une mesure sur deux
+        if (gps_want) gps_start();
         if (need_bme && !bme_ok) bme_ok = (bme_init() == 0);
     }
 
-    if (!got_bme) {
-        if (bme_ok && now - acq_try >= 200) {
-            acq_try = now;
-            got_bme = (bme_read(&t, &p, &h) == 0);
-        }
-        if (!got_bme && now - acq_start < (uint32_t)params.timeout * 1000UL) return;   // on réessaie
-        bme_miss = got_bme ? 0 : bme_miss + 1;
-    } else if (!need_bme) {
-        bme_miss = 0;
+    // Attente des capteurs : BME280 relu toutes les 200 ms, GPS = une trame RMC reçue depuis gps_start()
+    if (!got_bme && bme_ok && now - acq_try >= 200) {
+        acq_try = now;
+        got_bme = (bme_read(&t, &p, &h) == 0);
     }
+    int got_gps = !gps_want || gps_fresh();
+    if (!(got_bme && got_gps) && now - acq_start < (uint32_t)params.timeout * 1000UL) return;   // on réessaie
     acquiring = 0;
+    gps_stop();                                            // les capteurs s'arrêtent jusqu'à la prochaine mesure
 
-    // GPS : en économique, une mesure sur deux ; "accès" = trames reçues depuis moins de TIMEOUT secondes
-    int gps_now = (mode != MODE_ECO || n % 2 == 0);
-    int gps_alive_now = gps_alive((uint32_t)params.timeout * 1000UL);
-    if (gps_now) gps_miss = gps_alive_now ? 0 : gps_miss + 1;
-    if (gps_miss >= SENSOR_MAX_MISSES) error_set(ERR_GPS, 1);     // l'effacement est fait par gps_watch()
-    if (bme_miss >= SENSOR_MAX_MISSES) error_set(ERR_SENSOR, 1);   // l'effacement est fait par sensor_watch()
+    bme_miss = (!need_bme || got_bme) ? 0 : bme_miss + 1;
+    if (gps_want) gps_miss = got_gps ? 0 : gps_miss + 1;
+    error_set(ERR_GPS, gps_miss >= SENSOR_MAX_MISSES);     // "accès" = une trame reçue avant TIMEOUT secondes
+    error_set(ERR_SENSOR, bme_miss >= SENSOR_MAX_MISSES);
 
     // Seuils : hors plage = NA + erreur "incohérent" (l'hygrométrie hors plage de température est seulement ignorée)
     int ok_t = got_bme && need_bme && params.temp_air;
@@ -299,7 +229,7 @@ void measure_cycle(void)
     error_set(ERR_INCOHERENT, incoherent);
 
     char ts[TS_LEN], tb[12], pb[12], hb[12], lb[8], latb[16], lonb[16], altb[12], line[128];
-    int gps_ok = gps_now && gps_alive_now && gps_valid;
+    int gps_ok = gps_want && got_gps && gps_valid;
     timestamp(ts, sizeof(ts));
     fmt_val(tb, sizeof(tb), ok_t, "%.1f", t);
     fmt_val(pb, sizeof(pb), ok_p, "%.1f", p);
@@ -313,6 +243,7 @@ void measure_cycle(void)
     log_line(line);
     error_set(ERR_SD_IO, sd_error);
     error_set(ERR_SD_FULL, sd_full);
+    console("%s", line);
     console("Mesure #%lu : %s\r\n", (unsigned long)n,
             sd_error ? "echec ecriture SD" : (sd_full ? "carte SD pleine" : "enregistree sur SD"));
 }

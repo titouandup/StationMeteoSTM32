@@ -123,25 +123,47 @@ void gps_poll(void)
     }
 }
 
-int gps_alive(uint32_t max_ms)
+// Le GPS ne peut pas être mis en veille par commande (la broche PA0, TX de l'UART4, sert à la luminosité) :
+// on arrête sa réception. Il n'est écouté que le temps d'une acquisition.
+extern UART_HandleTypeDef huart4;
+static uint8_t gps_rx;                   // octet reçu par interruption
+static volatile uint8_t gps_on;
+static uint32_t gps_start_tick;
+
+void gps_start(void)
 {
-    return last_rmc_tick != 0 && HAL_GetTick() - last_rmc_tick <= max_ms;
+    if (gps_on) return;
+    idx = 0;
+    rmc_ready = gga_ready = 0;
+    gps_start_tick = HAL_GetTick();
+    gps_on = 1;
+    __HAL_UART_CLEAR_OREFLAG(&huart4);
+    HAL_UART_Receive_IT(&huart4, &gps_rx, 1);
 }
 
-void gps_report(void)
+void gps_stop(void)
 {
-    static uint32_t last_print;
-    uint32_t period = (mode == MODE_ECO) ? ECO_FACTOR * GPS_PRINT_MS : GPS_PRINT_MS;
-    uint32_t now = HAL_GetTick();
+    if (!gps_on) return;
+    gps_on = 0;
+    HAL_UART_AbortReceive_IT(&huart4);
+}
 
-    if (mode == MODE_CONFIG || now - last_print < period) return;   // pas d'acquisition en configuration
-    last_print = now;
+int gps_fresh(void)                      // 1 si une trame RMC est arrivée depuis gps_start()
+{
+    return gps_on && last_rmc_tick >= gps_start_tick && last_rmc_tick != 0;
+}
 
-    if (last_rmc_tick == 0 || now - last_rmc_tick > GPS_SILENCE_MS)
-        console("GPS : aucune donnee (verifier cablage port A1)\r\n");
-    else if (!gps_valid)
-        console("GPS : pas de fix (UTC %.2s:%.2s:%.2s)  satellites = %d\r\n", gps_time, gps_time + 2, gps_time + 4, gps_sats);
-    else
-        console("GPS : %.2s:%.2s:%.2s UTC  lat = %.5f  lon = %.5f  alt = %.1f m  satellites = %d\r\n",
-                gps_time, gps_time + 2, gps_time + 4, gps_lat, gps_lon, gps_alt_valid ? gps_alt : 0.0, gps_sats);
+// Appelée à chaque octet reçu : range l'octet et relance la réception tant que le GPS est écouté
+void gps_rx_done(void)
+{
+    gps_rx_byte((char)gps_rx);
+    if (gps_on) HAL_UART_Receive_IT(&huart4, &gps_rx, 1);
+}
+
+void gps_rx_error(void)
+{
+    if (gps_on) {
+        __HAL_UART_CLEAR_OREFLAG(&huart4);
+        HAL_UART_Receive_IT(&huart4, &gps_rx, 1);
+    }
 }

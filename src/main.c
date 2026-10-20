@@ -34,13 +34,9 @@ int main(void)
         rtc_poll();
         error_led();
         gps_poll();
-        gps_report();
-        sensors_report();
         console_poll();
         measure_cycle();
         sd_watch();
-        sensor_watch();
-        gps_watch();
         HAL_Delay(10);
     }
 }

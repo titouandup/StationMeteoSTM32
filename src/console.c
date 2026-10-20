@@ -46,7 +46,6 @@ void console_cmd_done(void)
 
 extern UART_HandleTypeDef huart4;   // GPS SIM28 (port A1 : PA1 = RX)
 
-static uint8_t rx_byte;             // GPS
 static uint8_t rx2_byte;            // console
 
 void UART4_IRQHandler(void)  { HAL_UART_IRQHandler(&huart4); }
@@ -55,8 +54,7 @@ void USART2_IRQHandler(void) { HAL_UART_IRQHandler(&huart2); }
 void serial_start(void)
 {
     HAL_NVIC_SetPriority(UART4_IRQn, 1, 0);
-    HAL_NVIC_EnableIRQ(UART4_IRQn);
-    HAL_UART_Receive_IT(&huart4, &rx_byte, 1);
+    HAL_NVIC_EnableIRQ(UART4_IRQn);            // la réception du GPS n'est armée que pendant une acquisition (gps_start)
 
     HAL_NVIC_SetPriority(USART2_IRQn, 1, 0);
     HAL_NVIC_EnableIRQ(USART2_IRQn);
@@ -70,14 +68,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *h)
         console_rx_byte((char)rx2_byte);
         HAL_UART_Receive_IT(&huart2, &rx2_byte, 1);
     } else if (h == &huart4) {
-        gps_rx_byte((char)rx_byte);
-        HAL_UART_Receive_IT(&huart4, &rx_byte, 1);
+        gps_rx_done();
     }
 }
 
 // Après une erreur (overrun...), la réception s'arrête : on la relance
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *h)
 {
-    if (h == &huart4) HAL_UART_Receive_IT(&huart4, &rx_byte, 1);
+    if (h == &huart4) gps_rx_error();
     if (h == &huart2) HAL_UART_Receive_IT(&huart2, &rx2_byte, 1);
 }
