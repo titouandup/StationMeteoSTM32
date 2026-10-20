@@ -167,6 +167,60 @@ void sensors_report(void)
     }
 }
 
+/* ---------- Surveillance de la carte SD ----------
+ * Toutes les SD_CHECK_MS : détecte le retrait de la carte et son retour, sans attendre la prochaine mesure.
+ */
+void sd_watch(void)
+{
+    static uint32_t last;
+    uint32_t now = HAL_GetTick();
+    if ((mode != MODE_STANDARD && mode != MODE_ECO) || now - last < SD_CHECK_MS) return;
+    last = now;
+
+    if (log_is_open) {
+        if (sd_present()) return;
+        sd_error = 1; sd_full = 0; log_stop();             // carte retirée
+    } else if (sd_error) {
+        if (!sd_probe() || log_start() != 0 || !sd_present()) { log_stop(); return; }   // toujours absente (test rapide d'abord)
+        sd_error = 0;                                      // carte revenue
+        console("SD : carte retrouvee, fichier %s\r\n", active_name);
+    } else {
+        return;
+    }
+    error_set(ERR_SD_IO, sd_error);
+    error_set(ERR_SD_FULL, sd_full);
+}
+
+/* ---------- Surveillance du BME280 ----------
+ * Toutes les SD_CHECK_MS : détecte le débranchement et le retour du capteur sans attendre la prochaine mesure.
+ */
+void sensor_watch(void)
+{
+    static uint32_t last;
+    static uint8_t miss, lost;
+    uint32_t now = HAL_GetTick();
+    if ((mode != MODE_STANDARD && mode != MODE_ECO) || now - last < SD_CHECK_MS) return;
+    last = now;
+
+    if (!(params.temp_air || params.hygr || params.pressure)) {   // capteur désactivé : rien à surveiller
+        miss = lost = 0;
+        error_set(ERR_SENSOR, 0);
+        return;
+    }
+
+    float t, p, h;
+    if (bme_ok && bme_read(&t, &p, &h) == 0) {
+        if (lost) { lost = 0; bme_init(); }                       // revenu : la puce est à reconfigurer
+        miss = 0;
+        error_set(ERR_SENSOR, 0);
+    } else {
+        lost = 1;
+        if (miss < 255) miss++;
+        if (miss >= SENSOR_CHECK_MISSES) error_set(ERR_SENSOR, 1);
+        if (!bme_ok && miss % 5 == 0) bme_ok = (bme_init() == 0);
+    }
+}
+
 /* ---------- Cycle de mesure ----------
  * Toutes les LOG_INTERVAL minutes (x ECO_FACTOR en économique) : une ligne horodatée sur la SD.
  * Le BME280 est relu toutes les 200 ms pendant TIMEOUT secondes au plus ; sans réponse, ses valeurs sont "NA"
@@ -213,7 +267,7 @@ void measure_cycle(void)
     int gps_alive_now = gps_alive((uint32_t)params.timeout * 1000UL);
     if (gps_now) gps_miss = gps_alive_now ? 0 : gps_miss + 1;
     error_set(ERR_GPS, gps_miss >= SENSOR_MAX_MISSES);
-    error_set(ERR_SENSOR, bme_miss >= SENSOR_MAX_MISSES);
+    if (bme_miss >= SENSOR_MAX_MISSES) error_set(ERR_SENSOR, 1);   // l'effacement est fait par sensor_watch()
 
     // Seuils : hors plage = NA + erreur "incohérent" (l'hygrométrie hors plage de température est seulement ignorée)
     int ok_t = got_bme && need_bme && params.temp_air;

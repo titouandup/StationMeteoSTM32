@@ -47,6 +47,8 @@
 #define HOLD_MS                5000UL  // durée d'appui long sur un bouton
 #define CONFIG_TIMEOUT_MIN     30      // minutes d'inactivité avant de quitter le mode configuration
 #define ERR_PERIOD_MS          1000    // période du clignotement de la LED en erreur (1 Hz)
+#define SD_CHECK_MS            2000UL  // période de vérification de la carte SD (retrait, retour)
+#define SENSOR_CHECK_MISSES    3       // vérifications (SD_CHECK_MS) sans réponse du BME280 avant de signaler l'erreur
 #define SENSOR_MAX_MISSES      2       // mesures consécutives en timeout avant de signaler le capteur en erreur
 
 /* ---------- Affichage console ---------- */
