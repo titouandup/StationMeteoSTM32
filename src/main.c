@@ -38,6 +38,8 @@ int main(void)
         sensors_report();
         console_poll();
         measure_cycle();
+        sd_watch();
+        sensor_watch();
         HAL_Delay(10);
     }
 }

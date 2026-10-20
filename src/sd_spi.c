@@ -8,6 +8,7 @@ extern SPI_HandleTypeDef hspi1;  // défini dans setup.c
 #define CMD0   0
 #define CMD8   8
 #define CMD9   9
+#define CMD13  13
 #define CMD16  16
 #define CMD17  17
 #define CMD24  24
@@ -21,6 +22,7 @@ enum { T_NONE, T_SD1, T_SD2, T_SDHC };
 static uint8_t  card_type;
 static uint32_t sectors;
 static int      last_error;
+static DSTATUS  stat = STA_NOINIT;   // état FatFs : 0 = carte initialisée
 
 /* ---------- SPI bas niveau ---------- */
 static void spi_speed(uint32_t prescaler)
@@ -215,7 +217,52 @@ int sd_write_block(uint32_t lba, const uint8_t *buf)
 }
 
 /* ---------- Lien avec FatFs (diskio) ---------- */
-static DSTATUS stat = STA_NOINIT;
+// Commande sans attendre la fin d'occupation de la carte (select_card peut bloquer 500 ms sans carte)
+static uint8_t quick_cmd(uint8_t cmd, uint32_t arg, uint8_t crc)
+{
+    deselect();
+    HAL_GPIO_WritePin(SD_CS_PORT, SD_CS_PIN, GPIO_PIN_RESET);
+    xfer(0xFF);
+    xfer(0x40 | cmd);
+    xfer(arg >> 24); xfer(arg >> 16); xfer(arg >> 8); xfer(arg);
+    xfer(crc);
+    uint8_t r = 0xFF;
+    for (int i = 0; i < 10 && (r & 0x80); i++) r = xfer(0xFF);
+    if (r != 0xFF) xfer(0xFF);                    // 2e octet de la réponse R2 de CMD13
+    deselect();
+    return r;
+}
+
+// La carte répond-elle encore ? Lecture du secteur 0 : seul un vrai secteur renvoie le jeton 0xFE.
+// (une simple réponse 0x00 à CMD13 ne suffit pas : sans carte, MISO peut rester à 0)
+int sd_present(void)
+{
+    int ok = 0;
+    deselect();
+    HAL_GPIO_WritePin(SD_CS_PORT, SD_CS_PIN, GPIO_PIN_RESET);
+    xfer(0xFF);
+    xfer(0x40 | CMD17); xfer(0); xfer(0); xfer(0); xfer(0); xfer(0x01);
+    uint8_t r = 0xFF;
+    for (int i = 0; i < 10 && (r & 0x80); i++) r = xfer(0xFF);
+    if (r == 0x00) {
+        uint8_t b;
+        uint32_t t = HAL_GetTick();
+        do { b = xfer(0xFF); } while (b == 0xFF && HAL_GetTick() - t < 100);
+        if (b == 0xFE) {
+            for (int i = 0; i < SD_BLOCK + 2; i++) xfer(0xFF);   // données + CRC, ignorés
+            ok = 1;
+        }
+    }
+    deselect();
+    if (!ok) stat = STA_NOINIT;                   // retirée : elle devra être réinitialisée au retour
+    return ok;
+}
+
+// Une carte est-elle (re)venue ? (CMD0 : réponse 0x01) Rapide, sans la longue initialisation.
+int sd_probe(void)
+{
+    return quick_cmd(CMD0, 0, 0x95) == 0x01;
+}
 
 DSTATUS disk_initialize(BYTE pdrv)
 {
@@ -233,7 +280,7 @@ DRESULT disk_read(BYTE pdrv, BYTE *buff, DWORD sector, UINT count)
 {
     if (pdrv != 0 || stat) return RES_NOTRDY;
     for (; count; count--, sector++, buff += SD_BLOCK)
-        if (sd_read_block(sector, buff) != 0) return RES_ERROR;
+        if (sd_read_block(sector, buff) != 0) { stat = STA_NOINIT; return RES_ERROR; }   // prochain montage : réinitialisation
     return RES_OK;
 }
 
@@ -241,7 +288,7 @@ DRESULT disk_write(BYTE pdrv, const BYTE *buff, DWORD sector, UINT count)
 {
     if (pdrv != 0 || stat) return RES_NOTRDY;
     for (; count; count--, sector++, buff += SD_BLOCK)
-        if (sd_write_block(sector, buff) != 0) return RES_ERROR;
+        if (sd_write_block(sector, buff) != 0) { stat = STA_NOINIT; return RES_ERROR; }
     return RES_OK;
 }
 

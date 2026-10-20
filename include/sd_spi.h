@@ -6,6 +6,8 @@
 #define SD_BLOCK 512
 
 int         sd_init(void);                               // 0 = OK, sinon code d'erreur
+int         sd_probe(void);                              // 1 = une carte répond (test rapide avant sd_init)
+int         sd_present(void);                            // 1 = la carte répond encore
 int         sd_last_error(void);                         // code de la dernière initialisation
 const char *sd_error_text(int code);
 const char *sd_type_name(void);
