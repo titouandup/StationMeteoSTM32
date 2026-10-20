@@ -40,6 +40,7 @@ int main(void)
         measure_cycle();
         sd_watch();
         sensor_watch();
+        gps_watch();
         HAL_Delay(10);
     }
 }

@@ -221,6 +221,18 @@ void sensor_watch(void)
     }
 }
 
+/* ---------- Surveillance du GPS ----------
+ * Toutes les SD_CHECK_MS : plus de trame RMC depuis GPS_SILENCE_MS = GPS débranché ; le retour efface l'erreur.
+ */
+void gps_watch(void)
+{
+    static uint32_t last;
+    uint32_t now = HAL_GetTick();
+    if ((mode != MODE_STANDARD && mode != MODE_ECO) || now - last < SD_CHECK_MS) return;
+    last = now;
+    error_set(ERR_GPS, !gps_alive(GPS_SILENCE_MS));
+}
+
 /* ---------- Cycle de mesure ----------
  * Toutes les LOG_INTERVAL minutes (x ECO_FACTOR en économique) : une ligne horodatée sur la SD.
  * Le BME280 est relu toutes les 200 ms pendant TIMEOUT secondes au plus ; sans réponse, ses valeurs sont "NA"
@@ -266,7 +278,7 @@ void measure_cycle(void)
     int gps_now = (mode != MODE_ECO || n % 2 == 0);
     int gps_alive_now = gps_alive((uint32_t)params.timeout * 1000UL);
     if (gps_now) gps_miss = gps_alive_now ? 0 : gps_miss + 1;
-    error_set(ERR_GPS, gps_miss >= SENSOR_MAX_MISSES);
+    if (gps_miss >= SENSOR_MAX_MISSES) error_set(ERR_GPS, 1);     // l'effacement est fait par gps_watch()
     if (bme_miss >= SENSOR_MAX_MISSES) error_set(ERR_SENSOR, 1);   // l'effacement est fait par sensor_watch()
 
     // Seuils : hors plage = NA + erreur "incohérent" (l'hygrométrie hors plage de température est seulement ignorée)
