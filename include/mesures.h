@@ -13,6 +13,8 @@ void sd_watch(void);                 // détecte le retrait / retour de la carte
 
 void sensor_watch(void);             // détecte le débranchement / retour du BME280
 
+void gps_watch(void);                // détecte le débranchement / retour du GPS
+
 void sensors_report(void);   // affichage périodique sur la console
 void measure_cycle(void);     // mesure + écriture SD toutes les LOG_INTERVAL minutes
 
