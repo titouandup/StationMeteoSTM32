@@ -17,11 +17,11 @@
 
 /*
  * Grove Light Sensor v1.3
- * Port Grove A2 du shield (PA4 = ADC1_IN9).
+ * Port Grove A0 du shield (PA0 = ADC1_IN5).
  */
-#define LIGHT_ADC_CHANNEL  ADC_CHANNEL_9
+#define LIGHT_ADC_CHANNEL  ADC_CHANNEL_5
 #define LIGHT_GPIO_PORT    GPIOA
-#define LIGHT_GPIO_PIN     GPIO_PIN_4
+#define LIGHT_GPIO_PIN     GPIO_PIN_0
 
 /*
  * Grove Dual Button v1.0
@@ -41,7 +41,7 @@
  */
 
 /*
- * Grove RTC v1.2 DS1307 + BME680
+ * Grove RTC v1.2 DS1307 + BME280
  * Tous deux sur I2C.
  */
 #define GROVE_I2C_HANDLE hi2c1
