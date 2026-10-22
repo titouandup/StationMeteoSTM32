@@ -44,7 +44,7 @@ void console_cmd_done(void)
     cmd_ready = 0;
 }
 
-extern UART_HandleTypeDef huart4;   // GPS SIM28 (port A1 : PA1 = RX)
+extern UART_HandleTypeDef huart4;   // GPS Air530Z (port A1 : PA1 = RX)
 
 static uint8_t rx2_byte;            // console
 
