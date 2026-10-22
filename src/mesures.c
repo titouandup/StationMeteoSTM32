@@ -234,7 +234,8 @@ void measure_cycle(void)
     fmt_val(tb, sizeof(tb), ok_t, "%.1f", t);
     fmt_val(pb, sizeof(pb), ok_p, "%.1f", p);
     fmt_val(hb, sizeof(hb), ok_h, "%.1f", h);
-    fmt_val(lb, sizeof(lb), params.lumin, "%.0f", params.lumin ? (double)lumin_read() : 0.0);
+    int lum = params.lumin ? (int)lumin_read() : 0;
+    fmt_val(lb, sizeof(lb), params.lumin, "%.0f", (double)lum);
     fmt_val(latb, sizeof(latb), gps_ok, "%.5f", gps_lat);
     fmt_val(lonb, sizeof(lonb), gps_ok, "%.5f", gps_lon);
     fmt_val(altb, sizeof(altb), gps_ok && gps_alt_valid, "%.1f", gps_alt);
@@ -244,6 +245,8 @@ void measure_cycle(void)
     error_set(ERR_SD_IO, sd_error);
     error_set(ERR_SD_FULL, sd_full);
     console("%s", line);
+    if (params.lumin)
+        console("Luminosite : %s\r\n", lum < params.lumin_low ? "faible" : (lum > params.lumin_high ? "forte" : "moyenne"));
     console("Mesure #%lu : %s\r\n", (unsigned long)n,
             sd_error ? "echec ecriture SD" : (sd_full ? "carte SD pleine" : "enregistree sur SD"));
 }
