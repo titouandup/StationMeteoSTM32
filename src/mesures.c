@@ -12,8 +12,8 @@
 #include "stm32l4xx_hal.h"
 
 /* ---------- Fichier de mesures (FatFs, noms 8.3) ----------
- * Fichier actif : AAMMJJ_0.LOG (date du jour). Plein, il devient AAMMJJ_N.LOG (N = 1 à 9, 1 = le plus ancien)
- * et un nouveau AAMMJJ_0.LOG démarre. À minuit, un nouveau fichier du jour est créé.
+ * Fichier actif : AAMMJJ00.LOG (date du jour). Plein, il devient AAMMJJNN.LOG (NN = 01 à 99, 01 = le plus ancien)
+ * et un nouveau AAMMJJ00.LOG démarre. Nom limité à 8 caractères (LFN désactivé). À minuit, un nouveau fichier du jour est créé.
  */
 uint8_t sd_error;   // 1 = la carte SD ne répond plus ou l'écriture a échoué
 uint8_t sd_full;    // 1 = plus de place sur la carte
@@ -31,9 +31,9 @@ DWORD get_fattime(void)
            ((DWORD)now_dt.h << 11) | ((DWORD)now_dt.m << 5) | (now_dt.s / 2);
 }
 
-static void log_name(char *buf, size_t n, int rev)    // "AAMMJJ_N.LOG"
+static void log_name(char *buf, size_t n, int rev)    // "AAMMJJNN.LOG"
 {
-    snprintf(buf, n, "%02u%02u%02u_%d.LOG",
+    snprintf(buf, n, "%02u%02u%02u%02d.LOG",
              rtc_fail ? 0 : now_dt.year % 100, rtc_fail ? 0 : now_dt.month, rtc_fail ? 0 : now_dt.day, rev);
 }
 
@@ -58,30 +58,21 @@ void log_stop(void)
     f_mount(NULL, "", 0);
 }
 
-// Fichier plein : AAMMJJ_0.LOG prend la première révision libre (1 à 9) et un nouveau fichier démarre.
-// Avec 9 archives déjà présentes, la plus ancienne (1) est supprimée et les autres sont décalées.
+// Fichier plein : AAMMJJ00.LOG prend la première révision libre (1 à 99) et un nouveau fichier démarre.
+// Avec 99 archives déjà présentes, rien n'est supprimé : retourne 1 (carte pleine) et l'enregistrement s'arrête.
 static int log_archive(void)
 {
     char from[16], to[16];
     FILINFO fi;
     int n;
 
-    f_close(&logf);
-    log_is_open = 0;
-    for (n = 1; n <= 9; n++) {
+    for (n = 1; n <= 99; n++) {
         log_name(to, sizeof(to), n);
         if (f_stat(to, &fi) == FR_NO_FILE) break;
     }
-    if (n == 10) {
-        log_name(to, sizeof(to), 1);
-        if (f_unlink(to) != FR_OK) return -1;
-        for (int r = 2; r <= 9; r++) {
-            log_name(from, sizeof(from), r);
-            log_name(to, sizeof(to), r - 1);
-            if (f_rename(from, to) != FR_OK) return -1;
-        }
-        n = 9;
-    }
+    if (n == 100) return 1;
+    f_close(&logf);
+    log_is_open = 0;
     log_name(from, sizeof(from), 0);
     log_name(to, sizeof(to), n);
     if (f_rename(from, to) != FR_OK) return -1;
@@ -112,8 +103,10 @@ static void log_line(const char *text)
         log_is_open = 0;
     }
     if (!log_is_open && log_start() != 0) { sd_error = 1; sd_full = 0; log_stop(); return; }
-    if ((uint32_t)f_size(&logf) + len > (uint32_t)params.file_max_size && log_archive() != 0) {
-        sd_error = 1; sd_full = 0; log_stop(); return;
+    if ((uint32_t)f_size(&logf) + len > (uint32_t)params.file_max_size) {
+        int r = log_archive();
+        if (r > 0) { sd_full = 1; sd_error = 0; return; }   // 99 archives pleines : on ne supprime rien
+        if (r < 0) { sd_error = 1; sd_full = 0; log_stop(); return; }
     }
     if (!sd_has_room(len)) { sd_full = 1; sd_error = 0; return; }
     if (f_write(&logf, text, len, &written) != FR_OK || f_sync(&logf) != FR_OK) {
