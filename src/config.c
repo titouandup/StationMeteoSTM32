@@ -26,6 +26,7 @@ static uint32_t checksum(const Params *p)   // FNV-1a
     return h;
 }
 
+// Au démarrage : relit les réglages en flash ; absents ou corrompus, on prend les valeurs par défaut
 void params_load(void)
 {
     const Stored *s = (const Stored *)PARAMS_ADDR;
@@ -35,6 +36,7 @@ void params_load(void)
         params = (Params)DEFAULT_PARAMS;
 }
 
+// Enregistre les réglages en flash (efface la page, puis réécrit) pour les garder après une coupure
 void params_save(void)
 {
     uint64_t buf[(sizeof(Stored) + 7) / 8];
@@ -152,6 +154,7 @@ static void cmd_day(const char *v)            // DAY=MON..SUN
     else console("RTC : erreur d'ecriture\r\n");
 }
 
+// Exécute une commande du mode configuration (NOM=valeur, RESET, VERSION, TIME, CLOCK, DATE, DAY)
 static void config_command(char *s)
 {
     char *val = strchr(s, '=');
@@ -181,6 +184,7 @@ static void config_command(char *s)
         console("Commande inconnue : %s\r\n", s);
 }
 
+// Appelée dans la boucle : traite la commande reçue, acceptée seulement en mode configuration
 void console_poll(void)
 {
     char *cmd = console_cmd();

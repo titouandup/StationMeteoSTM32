@@ -190,6 +190,7 @@ static void uart_init(UART_HandleTypeDef *h, USART_TypeDef *instance, uint32_t b
     }
 }
 
+// Initialise la carte : horloge, bus I2C et SPI, console (USART2) et GPS (UART4)
 void Global_Init(void)
 {
     HAL_Init();

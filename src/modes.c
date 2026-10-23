@@ -12,6 +12,7 @@
 #define DAT_PORT GPIOA
 #define DAT_PIN  GPIO_PIN_8    // D7 : données (DI)
 
+// Configure les deux broches qui pilotent la LED RGB
 void led_init(void)
 {
     GPIO_InitTypeDef gpio = {0};
@@ -21,6 +22,7 @@ void led_init(void)
 }
 
 /* ---------- LED ---------- */
+// Envoie un octet à la LED, bit par bit (horloge + données)
 static void send_byte(uint8_t b)
 {
     for (int i = 0; i < 8; i++) {
@@ -31,12 +33,14 @@ static void send_byte(uint8_t b)
     }
 }
 
+// Envoie une couleur (rouge, vert, bleu) dans le format de la LED P9813
 static void send_frame(uint8_t r, uint8_t g, uint8_t b)
 {
     uint8_t prefix = 0xC0 | ((~b & 0xC0) >> 2) | ((~g & 0xC0) >> 4) | ((~r & 0xC0) >> 6);
     send_byte(prefix); send_byte(b); send_byte(g); send_byte(r);
 }
 
+// Allume la LED de la couleur donnée (0 à 255 par composante)
 void leds_set_all(uint8_t r, uint8_t g, uint8_t b)
 {
     for (int i = 0; i < 4; i++) send_byte(0);
@@ -53,6 +57,7 @@ void leds_set_all(uint8_t r, uint8_t g, uint8_t b)
 Button button_green = { GREEN_PORT, GREEN_PIN, 0, 0, 0 };
 Button button_red   = { RED_PORT,   RED_PIN,   0, 0, 0 };
 
+// Vrai tant que le bouton est enfoncé
 int button_pressed(const Button *b)
 {
     return HAL_GPIO_ReadPin(b->port, b->pin) == PRESSED;
@@ -99,6 +104,7 @@ static Mode prev_mode;
 uint32_t mode_since;
 
 
+// Change de mode : allume la LED à la couleur du mode et l'annonce sur la console (en maintenance, ferme le fichier SD)
 void set_mode(Mode m)
 {
     mode = m;
@@ -108,6 +114,7 @@ void set_mode(Mode m)
     console("Mode : %s\r\n", mode_name[m]);
 }
 
+// Boutons : appui long vert = standard <-> économique, appui long rouge = maintenance (et retour au mode précédent) ; la configuration s'arrête après 30 min sans commande
 void update_mode(void)
 {
     switch (mode) {
@@ -146,6 +153,7 @@ static const ErrInfo err_info[ERR_COUNT] = {
 
 static uint8_t err_mask;                      // bit e = erreur e présente
 
+// Lève ou retire une erreur ; le message n'est affiché qu'à son apparition
 void error_set(ErrCode e, int on)
 {
     uint8_t bit = 1u << e;

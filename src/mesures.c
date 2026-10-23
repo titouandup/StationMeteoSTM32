@@ -51,6 +51,7 @@ static int log_start(void)                    // monte la carte puis ouvre le fi
     return f_mount(&fs, "", 1) == FR_OK ? log_open() : -1;
 }
 
+// Ferme le fichier et démonte la carte (elle peut être retirée sans risque)
 void log_stop(void)
 {
     if (log_is_open) f_close(&logf);
@@ -117,6 +118,7 @@ static void log_line(const char *text)
     sd_full = 0;
 }
 
+// Au démarrage : monte la carte, ouvre le fichier du jour et affiche l'état
 void sd_boot(void)
 {
     sd_error = (log_start() != 0);

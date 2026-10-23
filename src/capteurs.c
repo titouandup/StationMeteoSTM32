@@ -9,6 +9,7 @@
 // Luminosité (ADC1, PA0, 10 bits : 0 à 1023)
 static ADC_HandleTypeDef hadc1;
 
+// Prépare l'ADC pour lire le capteur de luminosité (PA0)
 void adc_init(void)
 {
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -43,6 +44,7 @@ void adc_init(void)
     HAL_ADC_ConfigChannel(&hadc1, &ch);
 }
 
+// Mesure la luminosité (0 à 1023)
 uint16_t lumin_read(void)
 {
     HAL_ADC_Start(&hadc1);
@@ -98,6 +100,7 @@ static int  gps_sats;                   // satellites utilisés (trame GGA)
 static char gps_time[7] = "------";    // hhmmss
 static uint32_t last_rmc_tick;
 
+// Décode les trames GPS reçues : position, validité du fix, heure, nombre de satellites, altitude
 void gps_poll(void)
 {
     char *f[12];
@@ -130,6 +133,7 @@ static uint8_t gps_rx;                   // octet reçu par interruption
 static volatile uint8_t gps_on;
 static uint32_t gps_start_tick;
 
+// Commence à écouter le GPS pour une acquisition
 void gps_start(void)
 {
     if (gps_on) return;
@@ -141,6 +145,7 @@ void gps_start(void)
     HAL_UART_Receive_IT(&huart4, &gps_rx, 1);
 }
 
+// Arrête l'écoute du GPS entre deux mesures
 void gps_stop(void)
 {
     if (!gps_on) return;
@@ -160,6 +165,7 @@ void gps_rx_done(void)
     if (gps_on) HAL_UART_Receive_IT(&huart4, &gps_rx, 1);
 }
 
+// Erreur de réception GPS : relance l'écoute si elle est active
 void gps_rx_error(void)
 {
     if (gps_on) {

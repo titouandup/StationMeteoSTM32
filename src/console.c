@@ -11,6 +11,7 @@ static uint8_t cmd_len;
 static volatile uint8_t cmd_ready;
 
 /* ---------- Console (USART2, sans printf) ---------- */
+// Affiche un texte (comme printf) sur la console série
 void console(const char *fmt, ...)
 {
     char buf[128];
@@ -38,6 +39,7 @@ char *console_cmd(void)                       // ligne complète reçue, ou NULL
     return cmd_ready ? cmd : NULL;
 }
 
+// Libère la ligne de commande une fois traitée, pour pouvoir en recevoir une autre
 void console_cmd_done(void)
 {
     cmd_len = 0;
@@ -51,6 +53,7 @@ static uint8_t rx2_byte;            // console
 void UART4_IRQHandler(void)  { HAL_UART_IRQHandler(&huart4); }
 void USART2_IRQHandler(void) { HAL_UART_IRQHandler(&huart2); }
 
+// Active les interruptions des deux liaisons série et lance l'écoute de la console
 void serial_start(void)
 {
     HAL_NVIC_SetPriority(UART4_IRQn, 1, 0);
