@@ -12,7 +12,7 @@
 #define DAT_PORT GPIOA
 #define DAT_PIN  GPIO_PIN_8    // D7 : données (DI)
 
-// Configure les deux broches qui pilotent la LED RGB
+// Configure en sortie les deux broches (horloge et données) de la LED RGB.
 void led_init(void)
 {
     GPIO_InitTypeDef gpio = {0};
@@ -22,7 +22,8 @@ void led_init(void)
 }
 
 /* ---------- LED ---------- */
-// Envoie un octet à la LED, bit par bit (horloge + données)
+// Envoie un octet à la LED, bit de poids fort en premier : la ligne de données est posée pendant que
+// l'horloge est basse, puis validée par un front montant.
 static void send_byte(uint8_t b)
 {
     for (int i = 0; i < 8; i++) {
@@ -33,14 +34,16 @@ static void send_byte(uint8_t b)
     }
 }
 
-// Envoie une couleur (rouge, vert, bleu) dans le format de la LED P9813
+// Envoie une couleur à la LED P9813 : un octet de début (deux bits à 1, puis les 2 bits de poids fort de
+// chaque couleur, inversés, pour la détection d'erreur) suivi du bleu, du vert et du rouge.
 static void send_frame(uint8_t r, uint8_t g, uint8_t b)
 {
     uint8_t prefix = 0xC0 | ((~b & 0xC0) >> 2) | ((~g & 0xC0) >> 4) | ((~r & 0xC0) >> 6);
     send_byte(prefix); send_byte(b); send_byte(g); send_byte(r);
 }
 
-// Allume la LED de la couleur donnée (0 à 255 par composante)
+// Allume la LED de la couleur donnée (0 à 255 par composante). Transmission : 32 bits à 0 (début), une
+// trame par LED, 32 bits à 0 (fin).
 void leds_set_all(uint8_t r, uint8_t g, uint8_t b)
 {
     for (int i = 0; i < 4; i++) send_byte(0);
@@ -57,13 +60,14 @@ void leds_set_all(uint8_t r, uint8_t g, uint8_t b)
 Button button_green = { GREEN_PORT, GREEN_PIN, 0, 0, 0 };
 Button button_red   = { RED_PORT,   RED_PIN,   0, 0, 0 };
 
-// Vrai tant que le bouton est enfoncé
+// Vrai tant que le bouton est enfoncé (les boutons relient la broche à la masse : état bas).
 int button_pressed(const Button *b)
 {
     return HAL_GPIO_ReadPin(b->port, b->pin) == PRESSED;
 }
 
-// Vrai une seule fois quand le bouton est maintenu HOLD_MS (re-armé au relâchement)
+// Vrai une seule fois quand le bouton est maintenu HOLD_MS (5 s). Au début de l'appui on note l'instant ;
+// quand la durée est atteinte on le signale une fois ; au relâchement on réarme.
 int button_held(Button *b)
 {
     uint32_t now = HAL_GetTick();
@@ -73,7 +77,9 @@ int button_held(Button *b)
     return 0;
 }
 
-void buttons_init(void)                       // actifs à l'état bas
+// Configure les deux boutons en entrée avec une résistance de rappel vers le haut : ils sont actifs à
+// l'état bas.
+void buttons_init(void)
 {
     GPIO_InitTypeDef gpio = {0};
     gpio.Mode = GPIO_MODE_INPUT;
@@ -104,7 +110,9 @@ static Mode prev_mode;
 uint32_t mode_since;
 
 
-// Change de mode : allume la LED à la couleur du mode et l'annonce sur la console (en maintenance, ferme le fichier SD)
+// Change de mode : mémorise l'instant (pour le délai de la configuration), allume la LED à la couleur du
+// mode et l'annonce sur la console. En maintenance, ferme le fichier SD pour qu'on puisse retirer la carte
+// sans risque.
 void set_mode(Mode m)
 {
     mode = m;
@@ -114,7 +122,11 @@ void set_mode(Mode m)
     console("Mode : %s\r\n", mode_name[m]);
 }
 
-// Boutons : appui long vert = standard <-> économique, appui long rouge = maintenance (et retour au mode précédent) ; la configuration s'arrête après 30 min sans commande
+// Gère les changements de mode avec les boutons (appui long de 5 s).
+// - Standard ou économique : vert = bascule entre les deux, rouge = maintenance (le mode d'origine est
+//   retenu).
+// - Maintenance : rouge = retour au mode d'origine.
+// - Configuration : retour au mode standard après 30 min sans commande.
 void update_mode(void)
 {
     switch (mode) {
@@ -153,7 +165,8 @@ static const ErrInfo err_info[ERR_COUNT] = {
 
 static uint8_t err_mask;                      // bit e = erreur e présente
 
-// Lève ou retire une erreur ; le message n'est affiché qu'à son apparition
+// Lève ou retire une erreur dans err_mask. Le message n'est affiché sur la console qu'à l'apparition de
+// l'erreur, pas à chaque mesure.
 void error_set(ErrCode e, int on)
 {
     uint8_t bit = 1u << e;
@@ -162,7 +175,9 @@ void error_set(ErrCode e, int on)
     else    err_mask &= ~bit;
 }
 
-// Affiche l'erreur la plus prioritaire ; sans erreur, la LED reprend la couleur du mode
+// Affiche l'erreur la plus prioritaire (E01 en premier) sur la LED, en alternant deux couleurs sur une
+// période de 1 s ; sans erreur, la LED reprend la couleur du mode. La LED n'est réécrite que si l'erreur
+// ou la phase a changé. L'erreur d'horloge (E01) est suivie ici car rtc_fail change dans rtc_poll.
 void error_led(void)
 {
     error_set(ERR_RTC, rtc_fail);

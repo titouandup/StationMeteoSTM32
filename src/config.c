@@ -18,7 +18,9 @@ Params params = DEFAULT_PARAMS;
 
 typedef struct { uint32_t magic; Params p; uint32_t check; } Stored;
 
-static uint32_t checksum(const Params *p)   // FNV-1a
+// Somme de contrôle FNV-1a des réglages. Si un seul octet change, le résultat change : elle sert à
+// détecter une zone de flash vide ou abîmée.
+static uint32_t checksum(const Params *p)
 {
     const uint8_t *b = (const uint8_t *)p;
     uint32_t h = 2166136261UL;
@@ -26,7 +28,8 @@ static uint32_t checksum(const Params *p)   // FNV-1a
     return h;
 }
 
-// Au démarrage : relit les réglages en flash ; absents ou corrompus, on prend les valeurs par défaut
+// Relit les réglages en flash au démarrage. Si la signature ou la somme de contrôle ne correspondent pas
+// (flash vierge, structure modifiée, corruption), on prend les valeurs par défaut.
 void params_load(void)
 {
     const Stored *s = (const Stored *)PARAMS_ADDR;
@@ -36,7 +39,9 @@ void params_load(void)
         params = (Params)DEFAULT_PARAMS;
 }
 
-// Enregistre les réglages en flash (efface la page, puis réécrit) pour les garder après une coupure
+// Enregistre les réglages en flash. La flash s'écrit par blocs de 8 octets et une page doit être effacée
+// en entier avant d'être réécrite : on prépare la zone complète (0xFF = case vide), on déverrouille, on
+// efface la page, on écrit, on reverrouille. Un échec est signalé sur la console.
 void params_save(void)
 {
     uint64_t buf[(sizeof(Stored) + 7) / 8];
@@ -78,14 +83,18 @@ static const ParamDef param_table[] = {
     { "PRESSURE_MAX",  &params.pressure_max, PRESSURE_VALUE_MIN, PRESSURE_VALUE_MAX },
 };
 
-// Un seuil bas doit rester strictement sous le seuil haut correspondant
+// Vérifie que chaque seuil bas reste strictement inférieur au seuil haut (luminosité, température,
+// hygrométrie, pression).
 static int thresholds_ok(void)
 {
     return params.lumin_low < params.lumin_high && params.min_temp_air < params.max_temp_air &&
            params.hygr_mint < params.hygr_maxt && params.pressure_min < params.pressure_max;
 }
 
-// Valide "NOM=valeur", applique et sauvegarde ; retourne 0 si le nom n'est pas dans la table
+// Traite « NOM=valeur » pour un réglage numérique de param_table. Refuse un texte qui n'est pas un entier
+// ou une valeur hors [min, max] ; applique la valeur, l'annule si les seuils deviennent incohérents, puis
+// sauvegarde en flash. Retourne 0 si le nom n'est pas dans la table (la commande est alors essayée
+// ailleurs).
 static int param_command(const char *name, const char *val)
 {
     for (size_t i = 0; i < sizeof(param_table) / sizeof(param_table[0]); i++) {
@@ -113,7 +122,8 @@ static int param_command(const char *name, const char *val)
 }
 
 /* ---------- Commandes de date et d'heure ---------- */
-static void cmd_clock(const char *v)          // CLOCK=HH:MM:SS
+// CLOCK=HH:MM:SS : règle l'heure de la RTC, la date et le jour restent inchangés.
+static void cmd_clock(const char *v)
 {
     int h, m, s;
     DateTime t;
@@ -127,7 +137,8 @@ static void cmd_clock(const char *v)          // CLOCK=HH:MM:SS
     else console("RTC : erreur d'ecriture\r\n");
 }
 
-static void cmd_date(const char *v)           // DATE=MOIS,JOUR,ANNEE
+// DATE=MM,JJ,AAAA : règle la date de la RTC (année 2000 à 2099), l'heure reste inchangée.
+static void cmd_date(const char *v)
 {
     int mo, d, y;
     DateTime t;
@@ -141,7 +152,8 @@ static void cmd_date(const char *v)           // DATE=MOIS,JOUR,ANNEE
     else console("RTC : erreur d'ecriture\r\n");
 }
 
-static void cmd_day(const char *v)            // DAY=MON..SUN
+// DAY=MON|TUE|WED|THU|FRI|SAT|SUN : règle le jour de la semaine de la RTC.
+static void cmd_day(const char *v)
 {
     DateTime t;
     int d = 0;
@@ -154,7 +166,9 @@ static void cmd_day(const char *v)            // DAY=MON..SUN
     else console("RTC : erreur d'ecriture\r\n");
 }
 
-// Exécute une commande du mode configuration (NOM=valeur, RESET, VERSION, TIME, CLOCK, DATE, DAY)
+// Exécute une ligne tapée en mode configuration. « NOM=valeur » est séparé en nom et valeur, puis dirigé
+// vers VERSION, RESET (réglages par défaut), un réglage numérique, CLOCK, DATE, DAY, ou TIME (affiche la
+// date et l'heure).
 static void config_command(char *s)
 {
     char *val = strchr(s, '=');
@@ -184,7 +198,8 @@ static void config_command(char *s)
         console("Commande inconnue : %s\r\n", s);
 }
 
-// Appelée dans la boucle : traite la commande reçue, acceptée seulement en mode configuration
+// Appelée dans la boucle : traite la commande reçue, uniquement en mode configuration (sinon elle est
+// refusée). Chaque commande repousse de 30 min la sortie automatique de la configuration.
 void console_poll(void)
 {
     char *cmd = console_cmd();

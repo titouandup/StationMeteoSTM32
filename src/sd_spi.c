@@ -25,13 +25,15 @@ static int      last_error;
 static DSTATUS  stat = STA_NOINIT;   // état FatFs : 0 = carte initialisée
 
 /* ---------- SPI bas niveau ---------- */
+// Change la vitesse du SPI (diviseur de l'horloge) : lente pendant l'initialisation de la carte, plus
+// rapide ensuite.
 static void spi_speed(uint32_t prescaler)
 {
     hspi1.Init.BaudRatePrescaler = prescaler;
     HAL_SPI_Init(&hspi1);
 }
 
-// Envoie un octet sur le SPI et renvoie l'octet reçu
+// Échange un octet sur le SPI : envoie tx et retourne l'octet reçu. Pour seulement lire, on envoie 0xFF.
 static uint8_t xfer(uint8_t tx)
 {
     uint8_t rx = 0xFF;
@@ -39,14 +41,15 @@ static uint8_t xfer(uint8_t tx)
     return rx;
 }
 
-// Désélectionne la carte (CS haut)
+// Désélectionne la carte (CS haut) et envoie un octet pour qu'elle relâche la ligne MISO.
 static void deselect(void)
 {
     HAL_GPIO_WritePin(SD_CS_PORT, SD_CS_PIN, GPIO_PIN_SET);
     xfer(0xFF);                                   // libère la ligne MISO
 }
 
-// Sélectionne la carte (CS bas) et attend qu'elle soit prête ; 0 si elle reste occupée
+// Sélectionne la carte (CS bas) et attend qu'elle soit prête : elle tient MISO bas tant qu'elle est
+// occupée. Retourne 0 si elle reste occupée plus de 500 ms.
 static int select_card(void)
 {
     HAL_GPIO_WritePin(SD_CS_PORT, SD_CS_PIN, GPIO_PIN_RESET);
@@ -57,7 +60,9 @@ static int select_card(void)
     return 1;
 }
 
-// Envoie une commande et renvoie la réponse R1 (0xFF = pas de réponse). CS reste bas.
+// Envoie une commande à la carte et retourne sa réponse R1 (0xFF = pas de réponse). Une commande = 0x40 +
+// son numéro, un argument sur 4 octets, un CRC ; la carte répond dans les 10 octets suivants. Les
+// commandes applicatives (ACMD) sont précédées de CMD55. CS reste bas pour la suite de l'échange.
 static uint8_t send_cmd(uint8_t cmd, uint32_t arg)
 {
     if (cmd & 0x80) {                             // commande applicative : CMD55 d'abord
@@ -81,7 +86,8 @@ static uint8_t send_cmd(uint8_t cmd, uint32_t arg)
     return r;
 }
 
-static int wait_token(void)                       // attend le jeton 0xFE qui précède les données
+// Attend le jeton 0xFE qui précède les données d'un bloc (200 ms au maximum). Retourne 0 s'il est reçu.
+static int wait_token(void)
 {
     uint32_t t = HAL_GetTick();
     uint8_t b;
@@ -90,7 +96,8 @@ static int wait_token(void)                       // attend le jeton 0xFE qui pr
 }
 
 /* ---------- Capacité (registre CSD) ---------- */
-// Lit la taille de la carte dans son registre CSD
+// Lit la taille de la carte dans son registre CSD (CMD9) et remplit sectors. Le format du registre dépend
+// du type : CSD v2 pour les SDHC/SDXC, v1 pour les anciennes cartes (2 Go et moins).
 static int read_capacity(void)
 {
     uint8_t csd[16];
@@ -113,7 +120,13 @@ static int read_capacity(void)
 }
 
 /* ---------- API ---------- */
-// Une tentative d'initialisation (reset, type de carte, taille) ; retourne un code d'erreur
+// Une tentative d'initialisation de la carte.
+// - Horloge lente (< 400 kHz) et 80 impulsions pour réveiller la carte.
+// - CMD0 la remet à zéro : pas de réponse = pas de carte.
+// - CMD8 distingue les cartes v2 des v1, ACMD41 lance l'initialisation interne (1 s au plus).
+// - CMD58 lit l'OCR, dont le bit 30 indique une carte haute capacité (SDHC).
+// - Vitesse relevée, puis lecture de la taille.
+// Retourne un code d'erreur (ERR_NONE si OK).
 static int sd_init_once(void)
 {
     uint8_t ocr[4];
@@ -156,7 +169,8 @@ static int sd_init_once(void)
     return ERR_NONE;
 }
 
-// Après un reset du processeur seul, la carte peut être restée dans un état intermédiaire : on réessaie
+// Initialise la carte, avec 3 essais : après un reset du processeur seul, la carte peut être restée dans
+// un état intermédiaire. Retourne ERR_NONE (0) si OK.
 int sd_init(void)
 {
     for (int try = 0; try < 3; try++) {
@@ -199,7 +213,8 @@ const char *sd_type_name(void)
 // Nombre de secteurs de 512 octets de la carte
 uint32_t sd_sector_count(void) { return sectors; }
 
-// Lit un bloc de 512 octets ; 0 = OK
+// Lit le bloc lba (512 octets) dans buf avec CMD17. Sur une SDHC l'adresse est un numéro de bloc, sur les
+// anciennes cartes un numéro d'octet. Retourne 0 si OK.
 int sd_read_block(uint32_t lba, uint8_t *buf)
 {
     uint32_t addr = (card_type == T_SDHC) ? lba : lba * SD_BLOCK;   // SDHC : adresse en blocs
@@ -209,7 +224,9 @@ int sd_read_block(uint32_t lba, uint8_t *buf)
     deselect();
     return 0;
 }
-// Écrit un bloc de 512 octets ; 0 = OK
+// Écrit buf (512 octets) dans le bloc lba avec CMD24 : jeton de début 0xFE, données, CRC ignoré. La carte
+// répond 0x05 si elle accepte, puis reste occupée (MISO bas) le temps d'écrire (500 ms au maximum).
+// Retourne 0 si OK.
 int sd_write_block(uint32_t lba, const uint8_t *buf)
 {
     uint32_t addr = (card_type == T_SDHC) ? lba : lba * SD_BLOCK;
@@ -228,7 +245,8 @@ int sd_write_block(uint32_t lba, const uint8_t *buf)
 }
 
 /* ---------- Lien avec FatFs (diskio) ---------- */
-// Commande sans attendre la fin d'occupation de la carte (select_card peut bloquer 500 ms sans carte)
+// Envoie une commande sans attendre que la carte soit libre (select_card pourrait bloquer 500 ms sans
+// carte). Sert à détecter vite un retrait ou un retour. Retourne la réponse R1 (0xFF = rien).
 static uint8_t quick_cmd(uint8_t cmd, uint32_t arg, uint8_t crc)
 {
     deselect();
@@ -244,8 +262,9 @@ static uint8_t quick_cmd(uint8_t cmd, uint32_t arg, uint8_t crc)
     return r;
 }
 
-// La carte répond-elle encore ? Lecture du secteur 0 : seul un vrai secteur renvoie le jeton 0xFE.
-// (une simple réponse 0x00 à CMD13 ne suffit pas : sans carte, MISO peut rester à 0)
+// Vrai si la carte répond encore. On lit le secteur 0 : seul un vrai secteur renvoie le jeton 0xFE (une
+// simple réponse 0x00 à CMD13 ne suffit pas : sans carte, MISO peut rester à 0). Si la lecture échoue, la
+// carte est marquée à réinitialiser (STA_NOINIT).
 int sd_present(void)
 {
     int ok = 0;
@@ -269,13 +288,16 @@ int sd_present(void)
     return ok;
 }
 
-// Une carte est-elle (re)venue ? (CMD0 : réponse 0x01) Rapide, sans la longue initialisation.
+// Une carte est-elle (re)venue ? Envoie CMD0 et regarde si elle répond 0x01. Rapide, sans la longue
+// initialisation.
 int sd_probe(void)
 {
     return quick_cmd(CMD0, 0, 0x95) == 0x01;
 }
 
-// FatFs : initialise la carte
+// Fonctions disk_* : c'est l'interface que FatFs appelle pour lire et écrire. Elles s'appuient sur
+// sd_init, sd_read_block et sd_write_block. Une erreur de lecture ou d'écriture marque la carte à
+// réinitialiser.
 DSTATUS disk_initialize(BYTE pdrv)
 {
     if (pdrv != 0) return STA_NOINIT;

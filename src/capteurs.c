@@ -9,7 +9,9 @@
 // Luminosité (ADC1, PA0, 10 bits : 0 à 1023)
 static ADC_HandleTypeDef hadc1;
 
-// Prépare l'ADC pour lire le capteur de luminosité (PA0)
+// Prépare l'ADC1 pour lire le capteur de luminosité sur PA0 (canal 5) : broche en mode analogique, une
+// seule conversion à la fois lancée par le logiciel, résultat sur 10 bits (0 à 1023), calibration de
+// l'ADC. Pas de conversion en continu, pour économiser l'énergie.
 void adc_init(void)
 {
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -44,7 +46,8 @@ void adc_init(void)
     HAL_ADC_ConfigChannel(&hadc1, &ch);
 }
 
-// Mesure la luminosité (0 à 1023)
+// Mesure la luminosité (0 à 1023) : lance une conversion, attend la fin (10 ms au maximum), lit le
+// résultat puis arrête l'ADC.
 uint16_t lumin_read(void)
 {
     HAL_ADC_Start(&hadc1);
@@ -59,7 +62,10 @@ static char line[100], rmc[100], gga[100];
 static uint8_t idx;
 static volatile uint8_t rmc_ready, gga_ready;
 
-// Appelée à chaque octet reçu du GPS : on ne garde que les trames RMC (position) et GGA (altitude)
+// Appelée à chaque octet reçu du GPS (par interruption, donc très courte). Le GPS envoie des lignes de
+// texte (trames NMEA) : « $GPRMC,... » (heure, validité, latitude, longitude) et « $GPGGA,... »
+// (satellites, altitude). Un '$' recommence la ligne ; à la fin de la ligne, seules les trames RMC et GGA
+// sont copiées et marquées « prêtes » pour gps_poll.
 void gps_rx_byte(char c)
 {
     if (c == '$') idx = 0;
@@ -77,7 +83,9 @@ void gps_rx_byte(char c)
     }
 }
 
-static int split(char *s, char *f[], int max)   // découpe sur ',' en gardant les champs vides
+// Découpe une trame sur les virgules en gardant les champs vides : chaque virgule est remplacée par un 0
+// de fin de texte et f[] reçoit le début de chaque champ. Retourne le nombre de champs.
+static int split(char *s, char *f[], int max)
 {
     int n = 0;
     f[n++] = s;
@@ -86,7 +94,9 @@ static int split(char *s, char *f[], int max)   // découpe sur ',' en gardant l
     return n;
 }
 
-static double to_deg(const char *s, char hemi)  // ddmm.mmmm -> degrés décimaux
+// Convertit un angle NMEA « ddmm.mmmm » (degrés et minutes collés) en degrés décimaux. Sud et Ouest
+// donnent un nombre négatif.
+static double to_deg(const char *s, char hemi)
 {
     double v = strtod(s, NULL);
     int d = (int)(v / 100);
@@ -100,7 +110,10 @@ static int  gps_sats;                   // satellites utilisés (trame GGA)
 static char gps_time[7] = "------";    // hhmmss
 static uint32_t last_rmc_tick;
 
-// Décode les trames GPS reçues : position, validité du fix, heure, nombre de satellites, altitude
+// Décode les trames préparées par gps_rx_byte.
+// - RMC : champ 2 = A si la position est valide, champs 3 à 6 = latitude et longitude.
+// - GGA : champ 6 = qualité du fix (0 = pas de fix), champ 7 = satellites, champ 9 = altitude en mètres.
+// Mémorise l'instant de la dernière trame RMC (pour gps_fresh).
 void gps_poll(void)
 {
     char *f[12];
@@ -117,7 +130,7 @@ void gps_poll(void)
         last_rmc_tick = HAL_GetTick();
         rmc_ready = 0;
     }
-    if (gga_ready) {                          // champ 6 = qualité du fix (0 = pas de fix), champ 9 = altitude en m
+    if (gga_ready) {
         n = split(gga, f, 12);
         if (n >= 8) gps_sats = atoi(f[7]);
         gps_alt_valid = (n >= 10 && f[6][0] > '0' && f[9][0] != 0);
@@ -133,7 +146,8 @@ static uint8_t gps_rx;                   // octet reçu par interruption
 static volatile uint8_t gps_on;
 static uint32_t gps_start_tick;
 
-// Commence à écouter le GPS pour une acquisition
+// Commence à écouter le GPS pour une acquisition : oublie les anciennes trames, note l'instant de départ,
+// efface une éventuelle erreur de réception et arme l'interruption sur le prochain octet.
 void gps_start(void)
 {
     if (gps_on) return;
@@ -145,7 +159,7 @@ void gps_start(void)
     HAL_UART_Receive_IT(&huart4, &gps_rx, 1);
 }
 
-// Arrête l'écoute du GPS entre deux mesures
+// Arrête l'écoute du GPS entre deux mesures (le GPS reste alimenté).
 void gps_stop(void)
 {
     if (!gps_on) return;
@@ -153,19 +167,24 @@ void gps_stop(void)
     HAL_UART_AbortReceive_IT(&huart4);
 }
 
-int gps_fresh(void)                      // 1 si une trame RMC est arrivée depuis gps_start()
+// Vrai si une trame RMC est arrivée depuis gps_start : le GPS répond, même s'il n'a pas encore de position
+// (gps_valid = 0).
+int gps_fresh(void)
 {
     return gps_on && last_rmc_tick >= gps_start_tick && last_rmc_tick != 0;
 }
 
-// Appelée à chaque octet reçu : range l'octet et relance la réception tant que le GPS est écouté
+// Appelée par HAL à chaque octet reçu du GPS : range l'octet (gps_rx_byte) puis relance la réception tant
+// que le GPS est écouté. L'interruption ne couvre qu'un octet à la fois, il faut la ré-armer à chaque
+// fois.
 void gps_rx_done(void)
 {
     gps_rx_byte((char)gps_rx);
     if (gps_on) HAL_UART_Receive_IT(&huart4, &gps_rx, 1);
 }
 
-// Erreur de réception GPS : relance l'écoute si elle est active
+// Après une erreur de réception (octet perdu...), la réception s'arrête : on efface l'erreur et on la
+// relance si le GPS est écouté.
 void gps_rx_error(void)
 {
     if (gps_on) {

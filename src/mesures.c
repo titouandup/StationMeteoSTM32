@@ -23,7 +23,8 @@ static FIL logf;
 static uint8_t log_is_open;
 static char active_name[16];
 
-// Horodatage des fichiers pour FatFs (1980-01-01 si la RTC ne répond pas)
+// Horodatage des fichiers pour FatFs : date et heure empaquetées sur 32 bits (année depuis 1980, mois,
+// jour, heure, minute, seconde/2). Si la RTC ne répond pas : 1er janvier 1980.
 DWORD get_fattime(void)
 {
     if (rtc_fail) return (1UL << 21) | (1UL << 16);
@@ -31,13 +32,17 @@ DWORD get_fattime(void)
            ((DWORD)now_dt.h << 11) | ((DWORD)now_dt.m << 5) | (now_dt.s / 2);
 }
 
-static void log_name(char *buf, size_t n, int rev)    // "AAMMJJNN.LOG"
+// Écrit dans buf le nom du fichier du jour pour la révision rev : « AAMMJJNN.LOG » (NN = 00 pour le
+// fichier actif, 01 à 99 pour les archives). Sans RTC : « 000000NN.LOG ».
+static void log_name(char *buf, size_t n, int rev)
 {
     snprintf(buf, n, "%02u%02u%02u%02d.LOG",
              rtc_fail ? 0 : now_dt.year % 100, rtc_fail ? 0 : now_dt.month, rtc_fail ? 0 : now_dt.day, rev);
 }
 
-static int log_open(void)                     // ouvre le fichier du jour en ajout
+// Ouvre le fichier du jour en ajout (il est créé s'il n'existe pas) et se place à la fin. Retourne 0 si
+// OK.
+static int log_open(void)
 {
     log_name(active_name, sizeof(active_name), 0);
     if (f_open(&logf, active_name, FA_OPEN_ALWAYS | FA_WRITE) != FR_OK) return -1;
@@ -46,12 +51,14 @@ static int log_open(void)                     // ouvre le fichier du jour en ajo
     return 0;
 }
 
-static int log_start(void)                    // monte la carte puis ouvre le fichier
+// Monte la carte (f_mount) puis ouvre le fichier du jour. Retourne 0 si OK.
+static int log_start(void)
 {
     return f_mount(&fs, "", 1) == FR_OK ? log_open() : -1;
 }
 
-// Ferme le fichier et démonte la carte (elle peut être retirée sans risque)
+// Ferme le fichier et démonte la carte : elle peut être retirée sans risque, et sera remontée au prochain
+// enregistrement.
 void log_stop(void)
 {
     if (log_is_open) f_close(&logf);
@@ -59,8 +66,9 @@ void log_stop(void)
     f_mount(NULL, "", 0);
 }
 
-// Fichier plein : AAMMJJ00.LOG prend la première révision libre (1 à 99) et un nouveau fichier démarre.
-// Avec 99 archives déjà présentes, rien n'est supprimé : retourne 1 (carte pleine) et l'enregistrement s'arrête.
+// Fichier plein : AAMMJJ00.LOG est renommé en archive au premier numéro libre (01 à 99), puis un nouveau
+// fichier vide est ouvert. Si les 99 archives existent déjà, rien n'est supprimé : retourne 1 (carte
+// pleine). Retourne 0 si OK, -1 en cas d'erreur.
 static int log_archive(void)
 {
     char from[16], to[16];
@@ -81,7 +89,8 @@ static int log_archive(void)
     return log_open();
 }
 
-// Place restante pour len octets ? (sans écrire de ligne tronquée)
+// Reste-t-il de la place pour len octets ? S'il reste des clusters libres sur la carte, oui. Sinon on
+// regarde la fin du dernier cluster déjà alloué au fichier. Évite d'écrire une ligne tronquée.
 static int sd_has_room(UINT len)
 {
     DWORD nclst;
@@ -92,7 +101,13 @@ static int sd_has_room(UINT len)
     return used != 0 && cluster - used >= len;
 }
 
-// Ajoute une ligne au fichier ; en cas d'échec, la carte est remontée au prochain essai
+// Ajoute une ligne au fichier du jour.
+// - Si le jour a changé (minuit), l'ancien fichier est fermé.
+// - Si aucun fichier n'est ouvert, la carte est montée et le fichier ouvert (échec = erreur SD).
+// - Si la ligne dépasse la taille maximale, le fichier est archivé (99 archives pleines = carte pleine).
+// - La place restante est vérifiée, puis la ligne est écrite et f_sync la force sur la carte : une coupure
+//   de courant fait perdre au plus une ligne.
+// En cas d'échec, la carte est remontée au prochain essai.
 static void log_line(const char *text)
 {
     UINT len = strlen(text), written;
@@ -118,7 +133,8 @@ static void log_line(const char *text)
     sd_full = 0;
 }
 
-// Au démarrage : monte la carte, ouvre le fichier du jour et affiche l'état
+// Au démarrage : monte la carte, ouvre le fichier du jour et affiche son état (type, taille, fichier) ou
+// la cause de l'erreur.
 void sd_boot(void)
 {
     sd_error = (log_start() != 0);
@@ -128,7 +144,8 @@ void sd_boot(void)
     error_set(ERR_SD_IO, sd_error);
 }
 
-static void fmt_val(char *b, size_t n, int ok, const char *fmt, double v)   // valeur absente = "NA"
+// Écrit une valeur dans b avec le format fmt, ou « NA » si elle est absente.
+static void fmt_val(char *b, size_t n, int ok, const char *fmt, double v)
 {
     if (ok) snprintf(b, n, fmt, v);
     else    snprintf(b, n, "NA");

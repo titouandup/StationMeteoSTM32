@@ -7,7 +7,12 @@
 #include "modes.h"
 #include "setup.h"
 
-// Démarrage : initialise tout, puis boucle sans fin (toutes les 10 ms : boutons, heure, LED, GPS, console, mesure, carte SD)
+// Programme principal.
+// - Initialise le matériel, puis relit les réglages enregistrés en flash.
+// - Prépare l'interface (LED, boutons, console), les capteurs (I2C, BME280, ADC, RTC) et la carte SD.
+// - Choisit le mode de départ : configuration si le bouton rouge est maintenu, sinon standard.
+// - Boucle sans fin : toutes les 10 ms, chaque fonction fait un petit travail puis rend la main (boutons,
+//   heure, LED, GPS, commandes console, mesure, surveillance de la carte SD).
 int main(void)
 {
     Global_Init();
