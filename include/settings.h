@@ -16,7 +16,7 @@
 #define FILE_MAX_SIZE_MIN      512
 #define FILE_MAX_SIZE_MAX      65536
 
-#define TIMEOUT_DEFAULT        30      // secondes avant d'abandonner l'acquisition d'un capteur
+#define TIMEOUT_DEFAULT        5       // secondes avant d'abandonner l'acquisition d'un capteur
 #define TIMEOUT_MIN            1
 #define TIMEOUT_MAX            600
 

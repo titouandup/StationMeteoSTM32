@@ -31,6 +31,7 @@ static void spi_speed(uint32_t prescaler)
     HAL_SPI_Init(&hspi1);
 }
 
+// Envoie un octet sur le SPI et renvoie l'octet reçu
 static uint8_t xfer(uint8_t tx)
 {
     uint8_t rx = 0xFF;
@@ -38,12 +39,14 @@ static uint8_t xfer(uint8_t tx)
     return rx;
 }
 
+// Désélectionne la carte (CS haut)
 static void deselect(void)
 {
     HAL_GPIO_WritePin(SD_CS_PORT, SD_CS_PIN, GPIO_PIN_SET);
     xfer(0xFF);                                   // libère la ligne MISO
 }
 
+// Sélectionne la carte (CS bas) et attend qu'elle soit prête ; 0 si elle reste occupée
 static int select_card(void)
 {
     HAL_GPIO_WritePin(SD_CS_PORT, SD_CS_PIN, GPIO_PIN_RESET);
@@ -87,6 +90,7 @@ static int wait_token(void)                       // attend le jeton 0xFE qui pr
 }
 
 /* ---------- Capacité (registre CSD) ---------- */
+// Lit la taille de la carte dans son registre CSD
 static int read_capacity(void)
 {
     uint8_t csd[16];
@@ -109,6 +113,7 @@ static int read_capacity(void)
 }
 
 /* ---------- API ---------- */
+// Une tentative d'initialisation (reset, type de carte, taille) ; retourne un code d'erreur
 static int sd_init_once(void)
 {
     uint8_t ocr[4];
@@ -162,8 +167,10 @@ int sd_init(void)
     return last_error;
 }
 
+// Code d'erreur de la dernière initialisation
 int sd_last_error(void) { return last_error; }
 
+// Texte clair pour un code d'erreur d'initialisation
 const char *sd_error_text(int code)
 {
     switch (code) {
@@ -178,6 +185,7 @@ const char *sd_error_text(int code)
     }
 }
 
+// Type de la carte détectée (SD v1, v2 ou SDHC/SDXC)
 const char *sd_type_name(void)
 {
     switch (card_type) {
@@ -188,8 +196,10 @@ const char *sd_type_name(void)
     }
 }
 
+// Nombre de secteurs de 512 octets de la carte
 uint32_t sd_sector_count(void) { return sectors; }
 
+// Lit un bloc de 512 octets ; 0 = OK
 int sd_read_block(uint32_t lba, uint8_t *buf)
 {
     uint32_t addr = (card_type == T_SDHC) ? lba : lba * SD_BLOCK;   // SDHC : adresse en blocs
@@ -199,6 +209,7 @@ int sd_read_block(uint32_t lba, uint8_t *buf)
     deselect();
     return 0;
 }
+// Écrit un bloc de 512 octets ; 0 = OK
 int sd_write_block(uint32_t lba, const uint8_t *buf)
 {
     uint32_t addr = (card_type == T_SDHC) ? lba : lba * SD_BLOCK;
@@ -264,6 +275,7 @@ int sd_probe(void)
     return quick_cmd(CMD0, 0, 0x95) == 0x01;
 }
 
+// FatFs : initialise la carte
 DSTATUS disk_initialize(BYTE pdrv)
 {
     if (pdrv != 0) return STA_NOINIT;
@@ -271,11 +283,13 @@ DSTATUS disk_initialize(BYTE pdrv)
     return stat;
 }
 
+// FatFs : la carte est-elle prête ?
 DSTATUS disk_status(BYTE pdrv)
 {
     return pdrv == 0 ? stat : STA_NOINIT;
 }
 
+// FatFs : lit des secteurs
 DRESULT disk_read(BYTE pdrv, BYTE *buff, DWORD sector, UINT count)
 {
     if (pdrv != 0 || stat) return RES_NOTRDY;
@@ -284,6 +298,7 @@ DRESULT disk_read(BYTE pdrv, BYTE *buff, DWORD sector, UINT count)
     return RES_OK;
 }
 
+// FatFs : écrit des secteurs
 DRESULT disk_write(BYTE pdrv, const BYTE *buff, DWORD sector, UINT count)
 {
     if (pdrv != 0 || stat) return RES_NOTRDY;
@@ -292,6 +307,7 @@ DRESULT disk_write(BYTE pdrv, const BYTE *buff, DWORD sector, UINT count)
     return RES_OK;
 }
 
+// FatFs : renseignements sur la carte (nombre et taille des secteurs)
 DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void *buff)
 {
     if (pdrv != 0 || stat) return RES_NOTRDY;

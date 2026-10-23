@@ -104,6 +104,7 @@ static int16_t  dig_H2, dig_H4, dig_H5;
 static int8_t   dig_H6;
 static int32_t  t_fine;
 
+// Détecte le BME280 (0x76 ou 0x77), lit ses coefficients de calibration et le met en veille ; 0 = OK
 int bme_init(void)
 {
     uint8_t id = 0, c[24], h1, h[7];
@@ -148,6 +149,7 @@ static int32_t comp_T(int32_t adc)
     return (t_fine * 5 + 128) >> 8;                 // centièmes de °C
 }
 
+// Pression corrigée à partir de la valeur brute (nécessite t_fine, donc comp_T avant)
 static uint32_t comp_P(int32_t adc)
 {
     int64_t v1 = (int64_t)t_fine - 128000;
@@ -165,6 +167,7 @@ static uint32_t comp_P(int32_t adc)
     return (uint32_t)p;                             // Pa x 256
 }
 
+// Humidité corrigée à partir de la valeur brute (nécessite t_fine, donc comp_T avant)
 static uint32_t comp_H(int32_t adc)
 {
     int32_t v = t_fine - 76800;
@@ -176,6 +179,7 @@ static uint32_t comp_H(int32_t adc)
     return (uint32_t)(v >> 12);                     // %HR x 1024
 }
 
+// Lance une mesure puis lit température (°C), pression (hPa) et humidité (%) ; 0 = OK, -1 = erreur
 int bme_read(float *t, float *p, float *h)
 {
     uint8_t d[8], v = 0x25;   // temp x1, pression x1, mode forcé : une seule mesure, puis retour en veille

@@ -7,6 +7,7 @@
 #include "modes.h"
 #include "setup.h"
 
+// Démarrage : initialise tout, puis boucle sans fin (toutes les 10 ms : boutons, heure, LED, GPS, console, mesure, carte SD)
 int main(void)
 {
     Global_Init();
