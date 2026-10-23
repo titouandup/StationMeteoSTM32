@@ -52,7 +52,7 @@ et tous les réglages dans `include/settings.h`.
 |---|---|---|---|
 | Intervalle de mesure | 10 min | 1 – 1440 | `LOG_INTERVAL` |
 | Taille d'un fichier | 2048 octets | 512 – 65536 | `FILE_MAX_SIZE` |
-| Attente d'un capteur | 5 s (30 s à remettre pour le rendu) | 1 – 600 | `TIMEOUT` |
+| Attente d'un capteur | 30 s | 1 – 600 | `TIMEOUT` |
 | Luminosité faible / forte | 255 / 768 | 0 – 1023 | `LUMIN_LOW`, `LUMIN_HIGH` |
 | Température air (erreur hors plage) | -10 / 60 °C | -40 – 85 | `MIN_TEMP_AIR`, `MAX_TEMP_AIR` |
 | Hygrométrie ignorée hors | 0 / 50 °C | -40 – 85 | `HYGR_MINT`, `HYGR_MAXT` |
